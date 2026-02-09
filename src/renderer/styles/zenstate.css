@@ -1,0 +1,821 @@
+/* ZenState Design System — matches SwiftUI appearance */
+
+:root {
+  /* Colors — dark theme matching macOS sidebar vibrancy */
+  --zen-primary: #007AFF;
+  --zen-text: #FFFFFF;
+  --zen-secondary-text: rgba(255, 255, 255, 0.6);
+  --zen-tertiary-text: rgba(255, 255, 255, 0.3);
+  --zen-background: rgba(30, 30, 30, 0.85);
+  --zen-secondary-bg: rgba(255, 255, 255, 0.06);
+  --zen-tertiary-bg: rgba(255, 255, 255, 0.03);
+  --zen-divider: rgba(255, 255, 255, 0.1);
+  --zen-hover: rgba(255, 255, 255, 0.08);
+
+  /* Status colors */
+  --status-available: #34C759;
+  --status-occupied: #FF9500;
+  --status-focused: #FF3B30;
+  --status-offline: #8E8E93;
+
+  /* Category colors */
+  --category-meetings: #FF3B30;
+  --category-development: #007AFF;
+  --category-design: #FF9500;
+  --category-writing: #34C759;
+  --category-research: #5856D6;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 24px;
+
+  /* Typography — match SF Pro (macOS) and Segoe UI (Windows) */
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Segoe UI Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  color: var(--zen-text);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Popover Container ──────────────────────────────────────── */
+
+.popover {
+  width: 320px;
+  height: 450px;
+  background: var(--zen-background);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Common Layout ──────────────────────────────────────────── */
+
+.vstack {
+  display: flex;
+  flex-direction: column;
+}
+
+.hstack {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.divider {
+  height: 1px;
+  background: var(--zen-divider);
+  margin: var(--space-sm) 0;
+}
+
+/* ── User Header ────────────────────────────────────────────── */
+
+.user-header {
+  padding: var(--space-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  position: relative;
+}
+
+.avatar .status-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2.5px solid var(--status-available);
+}
+
+.avatar .status-ring.occupied { border-color: var(--status-occupied); }
+.avatar .status-ring.focused { border-color: var(--status-focused); }
+.avatar .status-ring.offline { border-color: var(--status-offline); }
+
+.user-info {
+  flex: 1;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--zen-text);
+}
+
+.user-status {
+  font-size: 11px;
+  color: var(--zen-secondary-text);
+}
+
+/* ── Status Picker ──────────────────────────────────────────── */
+
+.status-picker {
+  display: flex;
+  gap: var(--space-sm);
+  padding: 0 var(--space-lg);
+}
+
+.status-btn {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 8px;
+  border: 1px solid var(--zen-divider);
+  background: var(--zen-secondary-bg);
+  color: var(--zen-secondary-text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.status-btn:hover {
+  background: var(--zen-hover);
+}
+
+.status-btn.active {
+  border-color: currentColor;
+}
+
+.status-btn.available { color: var(--status-available); }
+.status-btn.occupied { color: var(--status-occupied); }
+.status-btn.focused { color: var(--status-focused); }
+
+.status-btn.active.available { background: rgba(52, 199, 89, 0.15); }
+.status-btn.active.occupied { background: rgba(255, 149, 0, 0.15); }
+.status-btn.active.focused { background: rgba(255, 59, 48, 0.15); }
+
+/* ── Status Indicator Dot ───────────────────────────────────── */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.available { background: var(--status-available); }
+.status-dot.occupied { background: var(--status-occupied); }
+.status-dot.focused { background: var(--status-focused); }
+.status-dot.offline { background: var(--status-offline); }
+
+/* ── Team Presence Bar ──────────────────────────────────────── */
+
+.presence-bar {
+  padding: var(--space-md) var(--space-lg);
+}
+
+.presence-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--zen-secondary-bg);
+  overflow: hidden;
+  display: flex;
+}
+
+.presence-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.presence-counts {
+  display: flex;
+  gap: var(--space-lg);
+  margin-top: var(--space-sm);
+  font-size: 11px;
+  color: var(--zen-secondary-text);
+}
+
+.presence-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Team Member List ───────────────────────────────────────── */
+
+.team-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-lg);
+  max-height: 250px;
+}
+
+.team-member-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.team-member-row:hover {
+  background: var(--zen-hover);
+}
+
+.member-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.member-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.member-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--zen-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.member-status-text {
+  font-size: 10px;
+  color: var(--zen-secondary-text);
+}
+
+.member-message {
+  font-size: 10px;
+  color: var(--zen-secondary-text);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* ── Timer Display ──────────────────────────────────────────── */
+
+.timer-display {
+  padding: var(--space-md) var(--space-lg);
+  background: var(--zen-secondary-bg);
+  border-radius: 8px;
+  margin: 0 var(--space-lg);
+}
+
+.timer-time {
+  font-size: 24px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--zen-primary);
+}
+
+.timer-time.paused {
+  color: var(--status-occupied);
+}
+
+.timer-label {
+  font-size: 11px;
+  color: var(--zen-secondary-text);
+  margin-top: 2px;
+}
+
+.timer-controls {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+/* ── Category Picker ────────────────────────────────────────── */
+
+.category-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: var(--space-sm) 0;
+}
+
+.category-chip {
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--zen-divider);
+  background: var(--zen-tertiary-bg);
+  color: var(--zen-secondary-text);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.category-chip:hover {
+  background: var(--zen-hover);
+}
+
+.category-chip.selected {
+  background: var(--zen-primary);
+  border-color: var(--zen-primary);
+  color: white;
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+
+.footer {
+  display: flex;
+  align-items: center;
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--zen-divider);
+}
+
+/* Back button style — used in timer input, status message, settings */
+.footer-btn {
+  background: none;
+  border: none;
+  color: var(--zen-secondary-text);
+  cursor: pointer;
+  padding: var(--space-xs);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  transition: color 0.15s ease;
+}
+
+.footer-btn:hover {
+  color: var(--zen-text);
+}
+
+/* Footer utility icon group (left side) */
+.footer-utils {
+  display: flex;
+  gap: 2px;
+}
+
+/* Icon buttons (Settings, Timer) */
+.footer-icon-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--zen-secondary-text);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.footer-icon-btn:hover {
+  background-color: var(--zen-hover);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.footer-icon-btn:active {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Dashboard button (primary action, center-right) */
+.footer-action-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--zen-primary);
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.footer-action-btn:hover {
+  background-color: rgba(0, 122, 255, 0.1);
+}
+
+.footer-action-btn:active {
+  background-color: rgba(0, 122, 255, 0.18);
+}
+
+/* Quit button (text, right side) */
+.footer-quit-btn {
+  margin-left: 12px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.footer-quit-btn:hover {
+  background-color: var(--zen-hover);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.footer-quit-btn:active {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Buttons ────────────────────────────────────────────────── */
+
+.btn {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 6px;
+  border: none;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: var(--font-family);
+}
+
+.btn-primary {
+  background: var(--zen-primary);
+  color: white;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--zen-secondary-bg);
+  color: var(--zen-secondary-text);
+  border: 1px solid var(--zen-divider);
+}
+
+.btn-secondary:hover {
+  background: var(--zen-hover);
+}
+
+.btn-danger {
+  background: rgba(255, 59, 48, 0.15);
+  color: var(--status-focused);
+}
+
+.btn-danger:hover {
+  background: rgba(255, 59, 48, 0.25);
+}
+
+/* ── Text Input ─────────────────────────────────────────────── */
+
+.text-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 6px;
+  border: 1px solid var(--zen-divider);
+  background: var(--zen-secondary-bg);
+  color: var(--zen-text);
+  font-size: 12px;
+  font-family: var(--font-family);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.text-input:focus {
+  border-color: var(--zen-primary);
+}
+
+.text-input::placeholder {
+  color: var(--zen-tertiary-text);
+}
+
+/* ── Search Input ───────────────────────────────────────────── */
+
+.search-input {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  padding-left: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--zen-divider);
+  background: var(--zen-secondary-bg);
+  color: var(--zen-text);
+  font-size: 11px;
+  font-family: var(--font-family);
+  outline: none;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* ── Dashboard ──────────────────────────────────────────────── */
+
+.dashboard {
+  display: flex;
+  height: 100vh;
+  background: var(--zen-background);
+}
+
+.dashboard-sidebar {
+  width: 220px;
+  padding: var(--space-lg);
+  border-right: 1px solid var(--zen-divider);
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-content {
+  flex: 1;
+  padding: var(--space-xl);
+  overflow-y: auto;
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--zen-secondary-text);
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-family);
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  background: var(--zen-hover);
+}
+
+.tab-btn.active {
+  background: var(--zen-primary);
+  color: white;
+}
+
+.tab-btn svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.tab-btn.active svg {
+  opacity: 1;
+}
+
+/* ── Cards ──────────────────────────────────────────────────── */
+
+.card {
+  background: var(--zen-secondary-bg);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  margin-bottom: var(--space-md);
+}
+
+.card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--zen-text);
+  margin-bottom: var(--space-md);
+}
+
+/* ── Session Row ────────────────────────────────────────────── */
+
+.session-row {
+  display: flex;
+  align-items: center;
+  padding: var(--space-sm);
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.session-row:hover {
+  background: var(--zen-hover);
+}
+
+.session-row:hover .session-actions {
+  opacity: 1;
+}
+
+.session-actions {
+  opacity: 0;
+  display: flex;
+  gap: var(--space-xs);
+  transition: opacity 0.15s ease;
+}
+
+.session-action-btn {
+  background: none;
+  border: none;
+  color: var(--zen-secondary-text);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.session-action-btn:hover {
+  color: var(--zen-text);
+}
+
+.session-action-btn.delete:hover {
+  color: var(--status-focused);
+}
+
+/* ── Alert Panel ────────────────────────────────────────────── */
+
+.alert-panel {
+  background: rgba(30, 30, 30, 0.95);
+  border-radius: 16px;
+  padding: var(--space-xl);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--zen-divider);
+}
+
+.alert-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--zen-text);
+  margin-bottom: var(--space-md);
+}
+
+.alert-body {
+  font-size: 13px;
+  color: var(--zen-secondary-text);
+  margin-bottom: var(--space-lg);
+}
+
+/* ── Login View ─────────────────────────────────────────────── */
+
+.login-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-xl);
+  gap: var(--space-md);
+}
+
+.login-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--zen-text);
+}
+
+.login-subtitle {
+  font-size: 12px;
+  color: var(--zen-secondary-text);
+  text-align: center;
+}
+
+/* ── Animations ─────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ── Modal Overlay ─────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.15s ease;
+}
+
+.modal-content {
+  background: rgba(40, 40, 40, 0.98);
+  border-radius: 12px;
+  padding: var(--space-xl);
+  width: 380px;
+  max-width: 90vw;
+  border: 1px solid var(--zen-divider);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Team Grid (Dashboard) ─────────────────────────────────── */
+
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-md);
+}
+
+.team-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.team-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Select Input ──────────────────────────────────────────── */
+
+select.text-input {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='rgba(255,255,255,0.4)' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+select.text-input option {
+  background: #2a2a2a;
+  color: #ffffff;
+}
+
+/* ── Dashboard Drag Regions ────────────────────────────────── */
+
+/* Drag handle at top of sidebar where macOS traffic lights live */
+.drag-region {
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+/* Drag strip at top of content area */
+.drag-strip {
+  -webkit-app-region: drag;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+/* All interactive elements must be no-drag */
+.tab-btn,
+.btn,
+button,
+input,
+select,
+a,
+.team-card,
+.session-row,
+.category-chip,
+.calendar-day {
+  -webkit-app-region: no-drag;
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.dmg
+*.zip
+*.exe
+*.AppImage
+*.snap
+*.deb
+*.rpm
+.DS_Store
+.vite/

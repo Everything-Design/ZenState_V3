@@ -1,0 +1,48 @@
+appId: com.zenstate.app
+productName: ZenState
+copyright: Copyright © 2026 ZenState
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - "!node_modules/**/*"
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+  publisherName: ZenState
+
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+publish:
+  provider: github
+  owner: your-username
+  repo: zenstate
+  releaseType: release
