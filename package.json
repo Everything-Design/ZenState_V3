@@ -43,7 +43,7 @@
     "publish": {
       "provider": "github",
       "owner": "Everything-Design",
-      "repo": "ZenState"
+      "repo": "ZenState_V3"
     },
     "mac": {
       "icon": "build/icon.png",
@@ -51,11 +51,11 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": ["arm64"]
         },
         {
           "target": "zip",
-          "arch": ["universal"]
+          "arch": ["arm64"]
         }
       ],
       "entitlements": "build/entitlements.mac.plist",
