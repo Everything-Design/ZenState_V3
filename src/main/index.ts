@@ -44,17 +44,17 @@ function getRendererURL(page: string): string {
 // ── App Lifecycle ──────────────────────────────────────────────
 
 app.on('ready', async () => {
-  // Set app icon for Dock (shown when Dashboard opens)
-  const iconPath = path.join(__dirname, '../../build/icon.png');
-  try {
-    const dockIcon = nativeImage.createFromPath(iconPath);
-    if (!dockIcon.isEmpty()) {
-      app.dock?.setIcon(dockIcon);
-    }
-  } catch (_) { /* icon not found in dev — that's ok */ }
-
-  // Hide dock icon (menu bar app)
-  app.dock?.hide();
+  // macOS: Set Dock icon and hide it (menu bar app)
+  if (process.platform === 'darwin') {
+    const iconPath = path.join(__dirname, '../../build/icon.png');
+    try {
+      const dockIcon = nativeImage.createFromPath(iconPath);
+      if (!dockIcon.isEmpty()) {
+        app.dock?.setIcon(dockIcon);
+      }
+    } catch (_) { /* icon not found in dev — that's ok */ }
+    app.dock?.hide();
+  }
 
   // Create tray with callbacks for context menu actions
   createTray({
@@ -72,10 +72,10 @@ app.on('ready', async () => {
     onOpenDashboard: () => {
       if (!dashboardWindow || dashboardWindow.isDestroyed()) {
         dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
-        app.dock?.show();
+        if (process.platform === 'darwin') app.dock?.show();
         dashboardWindow.on('closed', () => {
           dashboardWindow = null;
-          if (!popoverWindow?.isVisible()) {
+          if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
             app.dock?.hide();
           }
         });
@@ -395,10 +395,10 @@ function setupIPC() {
   ipcMain.on(IPC.OPEN_DASHBOARD, () => {
     if (!dashboardWindow || dashboardWindow.isDestroyed()) {
       dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
-      app.dock?.show();
+      if (process.platform === 'darwin') app.dock?.show();
       dashboardWindow.on('closed', () => {
         dashboardWindow = null;
-        if (!popoverWindow?.isVisible()) {
+        if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
           app.dock?.hide();
         }
       });

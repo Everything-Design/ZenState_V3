@@ -50,6 +50,8 @@ body {
   font-size: 13px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
+  /* Solid fallback for Windows (no vibrancy); macOS vibrancy overrides this */
+  background: #1c1c1e;
 }
 
 /* ── Popover Container ──────────────────────────────────────── */

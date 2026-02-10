@@ -1,6 +1,8 @@
 import { BrowserWindow } from 'electron';
 import path from 'path';
 
+const isMac = process.platform === 'darwin';
+
 export function createPopoverWindow(url: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 320,
@@ -13,9 +15,10 @@ export function createPopoverWindow(url: string): BrowserWindow {
     maximizable: false,
     fullscreenable: false,
     skipTaskbar: true,
-    transparent: true,
-    vibrancy: 'sidebar', // macOS vibrancy
-    visualEffectState: 'active',
+    transparent: isMac,
+    ...(isMac
+      ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const }
+      : { backgroundColor: '#1c1c1e' }),
     hasShadow: true,
     webPreferences: {
       nodeIntegration: false,
@@ -47,9 +50,9 @@ export function createDashboardWindow(url: string): BrowserWindow {
     height: 650,
     minWidth: 800,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
-    vibrancy: 'sidebar',
-    visualEffectState: 'active',
+    ...(isMac
+      ? { titleBarStyle: 'hiddenInset' as const, vibrancy: 'sidebar' as const, visualEffectState: 'active' as const }
+      : { backgroundColor: '#1c1c1e' }),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,

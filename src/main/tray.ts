@@ -165,10 +165,13 @@ export function updateTrayIcon(user: User, timerElapsed: number = 0, timerRunnin
   const icon = createTrayIcon(color);
   tray.setImage(icon);
 
-  if (timerRunning && timerElapsed > 0) {
-    tray.setTitle(` ${formatTime(timerElapsed)}`, { fontType: 'monospacedDigit' });
-  } else {
-    tray.setTitle('');
+  // tray.setTitle() is macOS-only
+  if (process.platform === 'darwin') {
+    if (timerRunning && timerElapsed > 0) {
+      tray.setTitle(` ${formatTime(timerElapsed)}`, { fontType: 'monospacedDigit' });
+    } else {
+      tray.setTitle('');
+    }
   }
 
   tray.setToolTip(`ZenState — ${user.name} (${user.status})`);
@@ -183,7 +186,15 @@ export function positionPopover(window: BrowserWindow) {
   const windowBounds = window.getBounds();
 
   const x = Math.round(trayBounds.x + trayBounds.width / 2 - windowBounds.width / 2);
-  const y = Math.round(trayBounds.y + trayBounds.height);
+
+  let y: number;
+  if (process.platform === 'darwin') {
+    // macOS: tray at top → open below
+    y = Math.round(trayBounds.y + trayBounds.height);
+  } else {
+    // Windows/Linux: tray at bottom → open above
+    y = Math.round(trayBounds.y - windowBounds.height);
+  }
 
   window.setPosition(x, y);
 }

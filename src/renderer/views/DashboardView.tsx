@@ -71,7 +71,7 @@ export default function DashboardView({ currentUser, peers, timerState, records,
       {/* Sidebar */}
       <div className="dashboard-sidebar">
         {/* Drag region for macOS traffic lights */}
-        <div className="drag-region" style={{ height: 52, flexShrink: 0 }} />
+        <div className="drag-region" style={{ height: (window as any).zenstate?.platform === 'darwin' ? 52 : 16, flexShrink: 0 }} />
 
         {/* Profile */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>

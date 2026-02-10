@@ -88,4 +88,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   removeAllListeners: (channel: string) => {
     ipcRenderer.removeAllListeners(channel);
   },
+
+  // Platform info
+  platform: process.platform,
 });
