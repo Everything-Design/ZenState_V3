@@ -26,7 +26,18 @@ jobs:
       - name: Build source (Vite + TypeScript)
         run: npm run build
 
-      - name: Build and publish Windows installer
+      - name: Build Windows installer
+        run: npx electron-builder --win --publish never
+
+      - name: Upload to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          gh release upload "$tag" \
+            "dist/ZenState Setup ${version}.exe" \
+            "dist/ZenState-Setup-${version}.exe.blockmap" \
+            "dist/latest.yml" \
+            --clobber --repo Everything-Design/ZenState_V3
