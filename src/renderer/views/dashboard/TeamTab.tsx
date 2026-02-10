@@ -255,7 +255,9 @@ export default function TeamTab({ currentUser, peers }: Props) {
                   </button>
                 )}
 
-                {peer.status === AvailabilityStatus.Focused && !cooldowns[`emergency_${peer.id}`] && (
+                {peer.status === AvailabilityStatus.Focused &&
+                 (currentUser.canSendEmergency || currentUser.isAdmin) &&
+                 !cooldowns[`emergency_${peer.id}`] && (
                   <button
                     className="btn btn-danger"
                     style={{ fontSize: 10 }}

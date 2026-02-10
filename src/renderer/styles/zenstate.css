@@ -145,12 +145,12 @@ body {
 
 .status-btn {
   flex: 1;
-  padding: var(--space-sm) var(--space-md);
+  padding: 5px 6px;
   border-radius: 8px;
   border: 1px solid var(--zen-divider);
   background: var(--zen-secondary-bg);
   color: var(--zen-secondary-text);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   cursor: pointer;
   display: flex;
@@ -179,8 +179,8 @@ body {
 /* ── Status Indicator Dot ───────────────────────────────────── */
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }

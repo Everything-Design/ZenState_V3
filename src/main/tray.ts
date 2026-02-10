@@ -1,5 +1,11 @@
 import { Tray, Menu, nativeImage, BrowserWindow } from 'electron';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 import { User, AvailabilityStatus } from '../shared/types';
+
+// Cache directory for tray icon PNGs — fixes macOS template image issue
+const trayIconDir = path.join(os.tmpdir(), 'zenstate-tray-icons');
 
 let tray: Tray | null = null;
 let onClickCallback: (() => void) | null = null;
@@ -90,9 +96,19 @@ function createTrayIcon(color: string = '#34C759'): Electron.NativeImage {
       spokeThick, cr, cg, cb);
   }
 
-  const img = nativeImage.createFromBuffer(buf, { width: size, height: size, scaleFactor: 2.0 });
-  // Explicitly mark as non-template so macOS renders our status colors
-  // instead of applying monochrome tinting
+  // Write to PNG file and load from path — fixes macOS template image issue.
+  // nativeImage.createFromBuffer() + setTemplateImage(false) is broken in
+  // Electron 33.x on macOS; the OS still treats the buffer as a template
+  // image and renders it monochrome.  Loading from a real PNG file works.
+  if (!fs.existsSync(trayIconDir)) {
+    fs.mkdirSync(trayIconDir, { recursive: true });
+  }
+
+  const tempImg = nativeImage.createFromBuffer(buf, { width: size, height: size, scaleFactor: 2.0 });
+  const pngPath = path.join(trayIconDir, `tray-${color.replace('#', '')}.png`);
+  fs.writeFileSync(pngPath, tempImg.toPNG());
+
+  const img = nativeImage.createFromPath(pngPath);
   img.setTemplateImage(false);
   return img;
 }
