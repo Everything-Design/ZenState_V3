@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "3.0.8",
+  "version": "3.0.9",
   "description": "Team presence & availability — know when your teammates are free, focused, or busy",
   "main": "dist/main/index.js",
   "scripts": {
@@ -63,7 +63,12 @@
     },
     "win": {
       "icon": "build/icon.png",
-      "target": ["nsis"]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
