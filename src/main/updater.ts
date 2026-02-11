@@ -1,4 +1,5 @@
 import { autoUpdater } from 'electron-updater';
+import { BrowserWindow } from 'electron';
 
 export function setupUpdater() {
   autoUpdater.autoDownload = true;
@@ -10,6 +11,10 @@ export function setupUpdater() {
 
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`Update downloaded: ${info.version} — will install on quit`);
+    // Notify all renderer windows so they can show a restart prompt
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('update:downloaded', { version: info.version });
+    }
   });
 
   autoUpdater.on('error', (err) => {

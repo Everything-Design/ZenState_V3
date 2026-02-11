@@ -80,9 +80,9 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
 
     switch (statPeriod) {
       case 'today':
-        return records.filter((r) => r.date === today);
+        return records.filter((r) => r.date.startsWith(today));
       case 'week':
-        return records.filter((r) => new Date(r.date + 'T00:00:00') >= weekStart);
+        return records.filter((r) => new Date(r.date.split('T')[0] + 'T00:00:00') >= weekStart);
       case 'month':
         return records.filter((r) => r.date.startsWith(monthStr));
       default:
@@ -115,7 +115,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
   // Today's data
   const todayRecord = useMemo(() => {
     const today = getTodayDateStr();
-    return records.find((r) => r.date === today) || null;
+    return records.find((r) => r.date.startsWith(today)) || null;
   }, [records]);
 
   const todaySessions = useMemo(() => {
@@ -143,7 +143,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
 
   const calendarRecordMap = useMemo(() => {
     const map: Record<string, DailyRecord> = {};
-    records.forEach((r) => map[r.date] = r);
+    records.forEach((r) => map[r.date.split('T')[0]] = r);
     return map;
   }, [records]);
 

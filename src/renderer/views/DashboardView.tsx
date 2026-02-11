@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Users, Timer, ClipboardList } from 'lucide-react';
+import { Users, Timer, ClipboardList, Settings } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimerTab from './dashboard/TimerTab';
 import TimesheetTab from './dashboard/TimesheetTab';
+import SettingsTab from './dashboard/SettingsTab';
 
 interface TimerState {
   elapsed: number;
@@ -21,6 +22,7 @@ interface Props {
   onRefreshRecords: () => void;
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
+  onSignOut: () => void;
 }
 
 function getStatusColor(status: AvailabilityStatus): string {
@@ -41,9 +43,9 @@ function getStatusLabel(status: AvailabilityStatus): string {
   }
 }
 
-type Tab = 'team' | 'timer' | 'timesheet';
+type Tab = 'team' | 'timer' | 'timesheet' | 'settings';
 
-export default function DashboardView({ currentUser, peers, timerState, records, onRefreshRecords, onStatusChange, onUserUpdate }: Props) {
+export default function DashboardView({ currentUser, peers, timerState, records, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('team');
   const [editingStatus, setEditingStatus] = useState(false);
   const [statusInput, setStatusInput] = useState('');
@@ -192,6 +194,12 @@ export default function DashboardView({ currentUser, peers, timerState, records,
           >
             <ClipboardList size={16} /> Timesheet
           </button>
+          <button
+            className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            <Settings size={16} /> Settings
+          </button>
         </div>
 
         <div className="spacer" />
@@ -215,6 +223,14 @@ export default function DashboardView({ currentUser, peers, timerState, records,
           <TimesheetTab
             records={records}
             onRefreshRecords={onRefreshRecords}
+          />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsTab
+            currentUser={currentUser}
+            peers={peers}
+            onUserUpdate={onUserUpdate}
+            onSignOut={onSignOut}
           />
         )}
       </div>

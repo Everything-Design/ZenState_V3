@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, AvailabilityStatus, DailyRecord, IPC } from '../shared/types';
 import DashboardView from './views/DashboardView';
 
@@ -24,10 +24,16 @@ declare global {
       closePopover: () => void;
       quit: () => void;
       login: (user: User) => void;
+      signOut: () => void;
       getRecords: (month?: string) => Promise<DailyRecord[]>;
       deleteSession: (sessionId: string, date: string) => Promise<boolean>;
       updateSession: (sessionId: string, date: string, updates: unknown) => Promise<boolean>;
       exportCSV: (month: string) => Promise<string>;
+      getAppVersion: () => Promise<string>;
+      resetAllData: () => Promise<boolean>;
+      installUpdate: () => void;
+      getLoginItemSettings: () => Promise<boolean>;
+      setLoginItemSettings: (enabled: boolean) => void;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;
       removeAllListeners: (channel: string) => void;
     };
@@ -52,6 +58,8 @@ export default function DashboardApp() {
     taskLabel: '',
   });
   const [records, setRecords] = useState<DailyRecord[]>([]);
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  const prevTimerRunning = useRef(false);
 
   useEffect(() => {
     async function init() {
@@ -106,13 +114,32 @@ export default function DashboardApp() {
       setTimerState(data as TimerState);
     });
 
+    // Listen for update notifications
+    window.zenstate.on('update:downloaded', (data: unknown) => {
+      const info = data as { version: string };
+      setUpdateAvailable(info.version);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
       window.zenstate.removeAllListeners(IPC.PEER_LOST);
       window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
+      window.zenstate.removeAllListeners('update:downloaded');
     };
   }, [currentUser]);
+
+  // Auto-refresh records when timer stops
+  useEffect(() => {
+    if (prevTimerRunning.current && !timerState.isRunning) {
+      // Timer just stopped — refresh records after a brief delay for persistence
+      setTimeout(async () => {
+        const allRecords = await window.zenstate.getRecords() as DailyRecord[];
+        setRecords(allRecords);
+      }, 500);
+    }
+    prevTimerRunning.current = timerState.isRunning || timerState.isPaused;
+  }, [timerState.isRunning, timerState.isPaused]);
 
   const refreshRecords = useCallback(async () => {
     const allRecords = await window.zenstate.getRecords() as DailyRecord[];
@@ -134,6 +161,12 @@ export default function DashboardApp() {
     window.zenstate.saveUser(updated);
   }, [currentUser]);
 
+  const handleSignOut = useCallback(() => {
+    window.zenstate.signOut();
+    setCurrentUser(null);
+    setPeers([]);
+  }, []);
+
   if (!currentUser) {
     return (
       <div className="dashboard" style={{ alignItems: 'center', justifyContent: 'center' }}>
@@ -143,14 +176,68 @@ export default function DashboardApp() {
   }
 
   return (
-    <DashboardView
-      currentUser={currentUser}
-      peers={peers}
-      timerState={timerState}
-      records={records}
-      onRefreshRecords={refreshRecords}
-      onStatusChange={handleStatusChange}
-      onUserUpdate={handleUserUpdate}
-    />
+    <>
+      {/* Update notification banner */}
+      {updateAvailable && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 200,
+          background: 'var(--zen-primary)',
+          color: 'white',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          fontSize: 12,
+          fontWeight: 500,
+        }}>
+          <span style={{ flex: 1 }}>
+            ZenState v{updateAvailable} is ready. Restart to update.
+          </span>
+          <button
+            onClick={() => window.zenstate.installUpdate()}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.4)',
+              color: 'white',
+              padding: '4px 12px',
+              borderRadius: 6,
+              fontSize: 11,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Restart Now
+          </button>
+          <button
+            onClick={() => setUpdateAvailable(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'rgba(255,255,255,0.7)',
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: 2,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <DashboardView
+        currentUser={currentUser}
+        peers={peers}
+        timerState={timerState}
+        records={records}
+        onRefreshRecords={refreshRecords}
+        onStatusChange={handleStatusChange}
+        onUserUpdate={handleUserUpdate}
+        onSignOut={handleSignOut}
+      />
+    </>
   );
 }

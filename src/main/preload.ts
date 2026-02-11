@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('zenstate', {
   deleteSession: (sessionId: string, date: string) => ipcRenderer.invoke(IPC.DELETE_SESSION, { sessionId, date }),
   updateSession: (sessionId: string, date: string, updates: unknown) => ipcRenderer.invoke(IPC.UPDATE_SESSION, { sessionId, date, updates }),
   exportCSV: (month: string) => ipcRenderer.invoke(IPC.EXPORT_CSV, month),
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  resetAllData: () => ipcRenderer.invoke('data:reset-all'),
 
   // Send (fire-and-forget)
   updateStatus: (status: string) => ipcRenderer.send(IPC.UPDATE_STATUS, status),
@@ -66,6 +68,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   quit: () => ipcRenderer.send(IPC.QUIT_APP),
   login: (user: unknown) => ipcRenderer.send('user:login', user),
   signOut: () => ipcRenderer.send('user:sign-out'),
+  installUpdate: () => ipcRenderer.send('app:install-update'),
 
   // Settings
   getLoginItemSettings: () => ipcRenderer.invoke('settings:get-login-item'),
@@ -79,6 +82,7 @@ contextBridge.exposeInMainWorld('zenstate', {
       IPC.EMERGENCY_REQUEST, IPC.EMERGENCY_ACCESS,
       IPC.TIMER_UPDATE,
       'alert-data',
+      'update:downloaded',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));

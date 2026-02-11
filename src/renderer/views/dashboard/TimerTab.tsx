@@ -49,7 +49,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
 
   const todayRecord = useMemo(() => {
     const today = getTodayDateStr();
-    return records.find((r) => r.date === today);
+    return records.find((r) => r.date.startsWith(today));
   }, [records]);
 
   const todaySessions = useMemo(() => {

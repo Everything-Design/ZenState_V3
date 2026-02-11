@@ -19,13 +19,12 @@ export class TimeTracker {
 
   getRecordsForMonth(monthStr: string): DailyRecord[] {
     const records = this.persistence.getRecords();
-    const targetDate = new Date(monthStr);
-    const targetMonth = targetDate.getMonth();
-    const targetYear = targetDate.getFullYear();
+    // monthStr may be "YYYY-MM" — match by prefix
+    const prefix = monthStr.slice(0, 7); // "YYYY-MM"
 
     return records.filter((r) => {
-      const d = new Date(r.date);
-      return d.getMonth() === targetMonth && d.getFullYear() === targetYear;
+      const datePrefix = r.date.split('T')[0].slice(0, 7); // handles both YYYY-MM-DD and ISO
+      return datePrefix === prefix;
     });
   }
 
@@ -40,7 +39,7 @@ export class TimeTracker {
 
     return {
       id: uuidv4(),
-      date: today.toISOString(),
+      date: dateStr, // Store as YYYY-MM-DD for reliable matching
       totalFocusTime: 0,
       sessions: [],
     };
@@ -56,7 +55,7 @@ export class TimeTracker {
     if (!record) {
       record = {
         id: uuidv4(),
-        date: today.toISOString(),
+        date: dateStr, // Store as YYYY-MM-DD for reliable matching
         totalFocusTime: 0,
         sessions: [],
       };
@@ -117,7 +116,8 @@ export class TimeTracker {
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     for (const record of records.sort((a, b) => a.date.localeCompare(b.date))) {
-      const date = new Date(record.date);
+      // Use T00:00:00 to avoid UTC timezone shift when parsing YYYY-MM-DD
+      const date = new Date(record.date.split('T')[0] + 'T00:00:00');
       const dateFormatted = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
       const dayName = dayNames[date.getDay()];
 

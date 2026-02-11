@@ -17,11 +17,15 @@ export default function SettingsView({ currentUser, peers, onUserUpdate, onSignO
   const [nameInput, setNameInput] = useState(currentUser.name);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
 
-  // Check launch at login status
+  // Check launch at login status and app version
   useEffect(() => {
     window.zenstate.getLoginItemSettings?.().then((enabled: boolean) => {
       setLaunchAtLogin(enabled);
+    }).catch(() => {});
+    (window as any).zenstate.getAppVersion?.().then((v: string) => {
+      setAppVersion(v);
     }).catch(() => {});
   }, []);
 
@@ -295,7 +299,7 @@ export default function SettingsView({ currentUser, peers, onUserUpdate, onSignO
         )}
 
         <div style={{ fontSize: 9, color: 'var(--zen-tertiary-text)', textAlign: 'center', marginTop: 4 }}>
-          ZenState v3.0 · Electron
+          ZenState v{appVersion || '3.0'} · Electron
         </div>
       </div>
     </div>

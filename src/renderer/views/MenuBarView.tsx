@@ -302,33 +302,26 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
         ))}
       </div>
 
-      {/* Active Timer Display — compact */}
+      {/* Active Timer Display — single row */}
       {isTimerActive && (
-        <div className="timer-display" style={{ margin: '6px 16px', padding: '8px 12px' }}>
+        <div className="timer-display" style={{ margin: '6px 16px', padding: '6px 12px' }}>
           <div className="hstack" style={{ gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 10, color: 'var(--zen-secondary-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               ⏱ {timerState.taskLabel}
             </span>
-            {timerState.isPaused && (
-              <span style={{ fontSize: 8, color: 'var(--status-occupied)', fontWeight: 700, letterSpacing: 1 }}>
-                PAUSED
-              </span>
-            )}
-            <div className={`timer-time ${timerState.isPaused ? 'paused' : ''}`} style={{ fontSize: 18 }}>
+            <div className={`timer-time ${timerState.isPaused ? 'paused' : ''}`} style={{ fontSize: 14, flexShrink: 0 }}>
               {formatTime(timerState.elapsed)}
             </div>
-          </div>
-          <div className="timer-controls" style={{ marginTop: 4 }}>
             {timerState.isPaused ? (
-              <button className="btn btn-primary" style={{ fontSize: 10, padding: '4px 10px' }} onClick={() => window.zenstate.resumeTimer()}>
-                ▶ Resume
+              <button className="btn btn-primary" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => window.zenstate.resumeTimer()}>
+                ‖ Resume
               </button>
             ) : (
-              <button className="btn btn-secondary" style={{ fontSize: 10, padding: '4px 10px' }} onClick={() => window.zenstate.pauseTimer()}>
-                ⏸ Pause
+              <button className="btn btn-secondary" style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(255,149,0,0.15)', color: 'var(--status-occupied)', border: '1px solid rgba(255,149,0,0.3)', flexShrink: 0 }} onClick={() => window.zenstate.pauseTimer()}>
+                ‖ Pause
               </button>
             )}
-            <button className="btn btn-danger" style={{ fontSize: 10, padding: '4px 10px' }} onClick={() => window.zenstate.stopTimer()}>
+            <button className="btn btn-danger" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => window.zenstate.stopTimer()}>
               ■ Stop
             </button>
           </div>

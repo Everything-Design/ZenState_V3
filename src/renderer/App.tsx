@@ -53,6 +53,7 @@ export default function App() {
     taskLabel: '',
     category: undefined as string | undefined,
   });
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
 
   // Load initial data
   useEffect(() => {
@@ -104,11 +105,18 @@ export default function App() {
       setTimerState(data as typeof timerState);
     });
 
+    // Listen for update notifications
+    window.zenstate.on('update:downloaded', (data: unknown) => {
+      const info = data as { version: string };
+      setUpdateAvailable(info.version);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
       window.zenstate.removeAllListeners(IPC.PEER_LOST);
       window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
+      window.zenstate.removeAllListeners('update:downloaded');
     };
   }, []);
 
@@ -163,13 +171,46 @@ export default function App() {
   }
 
   return (
-    <MenuBarView
-      currentUser={currentUser}
-      peers={peers}
-      timerState={timerState}
-      onStatusChange={handleStatusChange}
-      onUserUpdate={handleUserUpdate}
-      onOpenSettings={() => setView('settings')}
-    />
+    <>
+      {/* Update notification banner */}
+      {updateAvailable && (
+        <div style={{
+          background: 'var(--zen-primary)',
+          color: 'white',
+          padding: '6px 12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          fontSize: 11,
+          fontWeight: 500,
+          borderRadius: '12px 12px 0 0',
+        }}>
+          <span style={{ flex: 1 }}>v{updateAvailable} ready — restart to update</span>
+          <button
+            onClick={() => (window as any).zenstate.installUpdate()}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: '1px solid rgba(255,255,255,0.4)',
+              color: 'white',
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontSize: 10,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Restart
+          </button>
+        </div>
+      )}
+      <MenuBarView
+        currentUser={currentUser}
+        peers={peers}
+        timerState={timerState}
+        onStatusChange={handleStatusChange}
+        onUserUpdate={handleUserUpdate}
+        onOpenSettings={() => setView('settings')}
+      />
+    </>
   );
 }

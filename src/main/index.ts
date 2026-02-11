@@ -437,6 +437,22 @@ function setupIPC() {
   ipcMain.on('settings:set-login-item', (_e, enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: enabled });
   });
+
+  // App version
+  ipcMain.handle('app:get-version', () => app.getVersion());
+
+  // Reset all data
+  ipcMain.handle('data:reset-all', () => {
+    persistence.saveRecords([]);
+    persistence.deleteUser();
+    return true;
+  });
+
+  // Install update (quit and install)
+  ipcMain.on('app:install-update', () => {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.quitAndInstall();
+  });
 }
 
 // ── Keyboard Shortcuts ─────────────────────────────────────────
