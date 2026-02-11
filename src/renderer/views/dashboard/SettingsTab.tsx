@@ -56,40 +56,30 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
       setLocalInfo(info);
     }).catch(() => {});
 
-    // Listen for update events
-    (window as any).zenstate.on('update:available', () => {
-      setUpdateStatus('available');
-    });
-    (window as any).zenstate.on('update:not-available', () => {
-      setUpdateStatus('not-available');
-      setTimeout(() => setUpdateStatus('idle'), 3000);
-    });
+    // Listen for auto-update download completion
     (window as any).zenstate.on('update:downloaded', () => {
       setUpdateStatus('downloaded');
     });
-    (window as any).zenstate.on('update:error', () => {
-      setUpdateStatus('not-available');
-      setTimeout(() => setUpdateStatus('idle'), 3000);
-    });
 
     return () => {
-      (window as any).zenstate.removeAllListeners?.('update:available');
-      (window as any).zenstate.removeAllListeners?.('update:not-available');
       (window as any).zenstate.removeAllListeners?.('update:downloaded');
-      (window as any).zenstate.removeAllListeners?.('update:error');
     };
   }, []);
 
-  function handleCheckForUpdate() {
+  async function handleCheckForUpdate() {
     setUpdateStatus('checking');
-    (window as any).zenstate.checkForUpdate?.();
-    // Timeout fallback — if no response in 15s, assume up to date
-    setTimeout(() => {
-      setUpdateStatus((prev) => prev === 'checking' ? 'not-available' : prev);
-      setTimeout(() => {
-        setUpdateStatus((prev) => prev === 'not-available' ? 'idle' : prev);
-      }, 3000);
-    }, 15000);
+    try {
+      const result = await (window as any).zenstate.checkForUpdate();
+      if (result?.updateAvailable) {
+        setUpdateStatus('available');
+      } else {
+        setUpdateStatus('not-available');
+        setTimeout(() => setUpdateStatus('idle'), 3000);
+      }
+    } catch {
+      setUpdateStatus('not-available');
+      setTimeout(() => setUpdateStatus('idle'), 3000);
+    }
   }
 
   function handleNameSave() {

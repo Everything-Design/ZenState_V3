@@ -1,5 +1,5 @@
 import { autoUpdater } from 'electron-updater';
-import { BrowserWindow } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 export function setupUpdater() {
   autoUpdater.autoDownload = true;
@@ -12,16 +12,8 @@ export function setupUpdater() {
     }
   });
 
-  autoUpdater.on('update-not-available', () => {
-    console.log('No updates available');
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('update:not-available');
-    }
-  });
-
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`Update downloaded: ${info.version} — will install on quit`);
-    // Notify all renderer windows so they can show a restart prompt
     for (const win of BrowserWindow.getAllWindows()) {
       win.webContents.send('update:downloaded', { version: info.version });
     }
@@ -29,10 +21,6 @@ export function setupUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('Auto-update error:', err);
-    // Notify renderers so "Checking..." doesn't hang forever
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('update:error', err.message);
-    }
   });
 
   // Check on launch
@@ -44,6 +32,23 @@ export function setupUpdater() {
   }, 4 * 60 * 60 * 1000);
 }
 
-export function checkForUpdate() {
-  autoUpdater.checkForUpdates();
+/**
+ * Manual update check — returns the result directly via Promise.
+ * Does not rely on event listeners.
+ */
+export async function checkForUpdate(): Promise<{ updateAvailable: boolean; version?: string }> {
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    if (result && result.updateInfo) {
+      const latest = result.updateInfo.version;
+      const current = app.getVersion();
+      if (latest !== current) {
+        return { updateAvailable: true, version: latest };
+      }
+    }
+    return { updateAvailable: false };
+  } catch (err) {
+    console.error('Manual update check error:', err);
+    return { updateAvailable: false };
+  }
 }

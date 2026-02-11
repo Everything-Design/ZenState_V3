@@ -472,9 +472,9 @@ function setupIPC() {
     autoUpdater.quitAndInstall();
   });
 
-  // Check for update (manual)
+  // Check for update (manual) — returns result directly
   ipcMain.handle('app:check-for-update', async () => {
-    checkForUpdate();
+    return await checkForUpdate();
   });
 
   // Categories
