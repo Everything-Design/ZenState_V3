@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Settings, Timer, LayoutDashboard } from 'lucide-react';
-import { User, AvailabilityStatus } from '../../shared/types';
+import { User, AvailabilityStatus, IPC } from '../../shared/types';
 
 const CATEGORIES = ['Development', 'Design', 'Meetings', 'Writing', 'Research', 'Planning', 'Admin', 'Other'];
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
@@ -61,6 +61,25 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
   const [pendingRequests, setPendingRequests] = useState<Record<string, boolean>>({});
+
+  // Clear pending request when peer responds (accept or decline)
+  useEffect(() => {
+    const handler = (data: unknown) => {
+      const response = data as { accepted: boolean; from: string };
+      // Find peer by name and clear their pending state
+      const peer = peers.find((p) => p.name === response.from);
+      if (peer) {
+        setPendingRequests((prev) => {
+          const { [peer.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }
+    };
+    window.zenstate.on(IPC.MEETING_RESPONSE, handler);
+    return () => {
+      window.zenstate.removeAllListeners(IPC.MEETING_RESPONSE);
+    };
+  }, [peers]);
 
   // Online peers only (hide offline)
   const onlinePeers = useMemo(() => {

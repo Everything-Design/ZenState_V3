@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld('zenstate', {
       'update:available',
       'update:not-available',
       'update:downloaded',
+      'update:error',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));

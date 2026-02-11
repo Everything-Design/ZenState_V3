@@ -29,6 +29,10 @@ export function setupUpdater() {
 
   autoUpdater.on('error', (err) => {
     console.error('Auto-update error:', err);
+    // Notify renderers so "Checking..." doesn't hang forever
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('update:error', err.message);
+    }
   });
 
   // Check on launch

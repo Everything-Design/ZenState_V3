@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { User, AvailabilityStatus } from '../../../shared/types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { User, AvailabilityStatus, IPC } from '../../../shared/types';
 
 interface Props {
   currentUser: User;
@@ -38,6 +38,24 @@ export default function TeamTab({ currentUser, peers }: Props) {
   const [sentConfirms, setSentConfirms] = useState<Record<string, boolean>>({});
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
+
+  // Clear pending request when peer responds (accept or decline)
+  useEffect(() => {
+    const handler = (data: unknown) => {
+      const response = data as { accepted: boolean; from: string };
+      const peer = peers.find((p) => p.name === response.from);
+      if (peer) {
+        setPendingRequests((prev) => {
+          const { [peer.id]: _, ...rest } = prev;
+          return rest;
+        });
+      }
+    };
+    window.zenstate.on(IPC.MEETING_RESPONSE, handler);
+    return () => {
+      window.zenstate.removeAllListeners(IPC.MEETING_RESPONSE);
+    };
+  }, [peers]);
 
   // Online peers only (hide offline)
   const onlinePeers = useMemo(() => {
