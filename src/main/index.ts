@@ -8,6 +8,17 @@ import { TimeTracker } from './services/timeTracker';
 import { setupUpdater } from './updater';
 import { IPC, AvailabilityStatus, User, MessageType } from '../shared/types';
 
+// ── Global Error Safety Net ─────────────────────────────────────
+// Catches any unhandled errors that slip through socket error handlers.
+// Prevents the Electron main process from crashing entirely.
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception in main process:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection in main process:', reason);
+});
+
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {

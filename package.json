@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "description": "Team presence & availability — know when your teammates are free, focused, or busy",
   "main": "dist/main/index.js",
   "scripts": {
@@ -71,7 +71,9 @@
       "allowToChangeInstallationDirectory": false
     },
     "files": [
-      "dist/**/*"
+      "dist/main/**/*",
+      "dist/renderer/**/*",
+      "dist/shared/**/*"
     ]
   }
 }

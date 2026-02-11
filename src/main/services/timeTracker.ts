@@ -30,8 +30,7 @@ export class TimeTracker {
 
   getTodayRecord(): DailyRecord {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dateStr = today.toISOString().split('T')[0];
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     const records = this.persistence.getRecords();
     const existing = records.find((r) => r.date.startsWith(dateStr));
@@ -48,8 +47,7 @@ export class TimeTracker {
   addSession(data: { taskLabel: string; category?: string; duration: number; startTime: string; endTime: string }) {
     const records = this.persistence.getRecords();
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dateStr = today.toISOString().split('T')[0];
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     let record = records.find((r) => r.date.startsWith(dateStr));
     if (!record) {

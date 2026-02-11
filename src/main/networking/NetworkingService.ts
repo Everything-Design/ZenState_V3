@@ -41,6 +41,29 @@ export class NetworkingService extends EventEmitter {
     this.currentUser = user;
   }
 
+  /**
+   * Safely tear down a socket and remove its associated peer.
+   * Idempotent — safe to call multiple times for the same socket.
+   */
+  private cleanupSocket(socket: net.Socket, reason?: string) {
+    if (reason) {
+      console.log(`Socket cleanup (${reason})`);
+    }
+
+    for (const [userId, conn] of this.connections) {
+      if (conn === socket) {
+        this.connections.delete(userId);
+        this.peers.delete(userId);
+        this.emit('peerLost', userId);
+        break;
+      }
+    }
+
+    if (!socket.destroyed) {
+      socket.destroy();
+    }
+  }
+
   // ── Public API ───────────────────────────────────────────────
 
   start() {
@@ -132,6 +155,10 @@ export class NetworkingService extends EventEmitter {
       this.handleIncomingConnection(socket);
     });
 
+    this.tcpServer.on('error', (err) => {
+      console.error('TCP server error:', err);
+    });
+
     // Listen on random port (like NWListener dynamic port)
     this.tcpServer.listen(0, () => {
       const addr = this.tcpServer!.address() as net.AddressInfo;
@@ -147,6 +174,17 @@ export class NetworkingService extends EventEmitter {
   }
 
   private handleIncomingConnection(socket: net.Socket) {
+    const remoteAddr = `${socket.remoteAddress}:${socket.remotePort}`;
+
+    socket.on('error', (err) => {
+      console.error(`Socket error [incoming:${remoteAddr}]: ${err.message}`);
+      this.cleanupSocket(socket, `error: ${err.message}`);
+    });
+
+    socket.on('close', () => {
+      this.cleanupSocket(socket, `close:${remoteAddr}`);
+    });
+
     // Send our userInfo (symmetric handshake — matches Swift fix)
     this.sendUserInfo(socket);
     this.setupSocketReceiver(socket);
@@ -182,10 +220,8 @@ export class NetworkingService extends EventEmitter {
       // Find which peer this was and remove them
       for (const [userId, peer] of this.peers) {
         if (service.name?.startsWith(peer.id.substring(0, 8))) {
-          this.connections.get(userId)?.destroy();
-          this.connections.delete(userId);
-          this.peers.delete(userId);
-          this.emit('peerLost', userId);
+          const socket = this.connections.get(userId);
+          if (socket) this.cleanupSocket(socket, 'bonjour down');
           break;
         }
       }
@@ -207,29 +243,29 @@ export class NetworkingService extends EventEmitter {
     });
 
     socket.on('error', (err) => {
-      console.log(`Connection failed to ${endpointKey}: ${err.message}`);
-      socket.destroy();
+      console.log(`Socket error for ${endpointKey}: ${err.message}`);
 
-      // Retry up to 3 times with 2-second delay
-      const retryCount = (this.pendingRetries.get(endpointKey) ?? 0) + 1;
-      this.pendingRetries.set(endpointKey, retryCount);
-      if (retryCount < 3) {
-        setTimeout(() => this.connectToEndpoint(host, port), 2000);
+      // Check if this socket has a peer association (post-connection)
+      const hasPeer = Array.from(this.connections.values()).includes(socket);
+
+      if (!hasPeer) {
+        // Connection establishment failed — retry logic
+        socket.destroy();
+        const retryCount = (this.pendingRetries.get(endpointKey) ?? 0) + 1;
+        this.pendingRetries.set(endpointKey, retryCount);
+        if (retryCount < 3) {
+          setTimeout(() => this.connectToEndpoint(host, port), 2000);
+        } else {
+          this.pendingRetries.delete(endpointKey);
+        }
       } else {
-        this.pendingRetries.delete(endpointKey);
+        // Post-connection error — clean up the peer
+        this.cleanupSocket(socket, `post-connect error: ${err.message}`);
       }
     });
 
     socket.on('close', () => {
-      // Find and clean up peer
-      for (const [userId, conn] of this.connections) {
-        if (conn === socket) {
-          this.connections.delete(userId);
-          this.peers.delete(userId);
-          this.emit('peerLost', userId);
-          break;
-        }
-      }
+      this.cleanupSocket(socket, `close:${endpointKey}`);
     });
   }
 
@@ -251,14 +287,24 @@ export class NetworkingService extends EventEmitter {
   }
 
   private sendWireMessage(socket: net.Socket, message: PeerMessage) {
+    if (socket.destroyed || !socket.writable) {
+      return;
+    }
+
     try {
       const jsonData = Buffer.from(JSON.stringify(message), 'utf-8');
       const lengthBuf = Buffer.alloc(4);
       lengthBuf.writeUInt32BE(jsonData.length, 0);
 
-      socket.write(Buffer.concat([lengthBuf, jsonData]));
+      socket.write(Buffer.concat([lengthBuf, jsonData]), (err) => {
+        if (err) {
+          console.error(`Async write error: ${err.message}`);
+          this.cleanupSocket(socket, `write error: ${err.message}`);
+        }
+      });
     } catch (err) {
-      console.error('Send error:', err);
+      console.error('Sync send error:', err);
+      this.cleanupSocket(socket, 'sync write exception');
     }
   }
 
@@ -275,6 +321,13 @@ export class NetworkingService extends EventEmitter {
 
   private setupSocketReceiver(socket: net.Socket) {
     let buffer = Buffer.alloc(0);
+
+    // 30s timeout — if no data for 6 heartbeats, peer is gone
+    socket.setTimeout(30000);
+    socket.on('timeout', () => {
+      console.log('Socket timed out — closing connection');
+      this.cleanupSocket(socket, 'timeout');
+    });
 
     socket.on('data', (data) => {
       buffer = Buffer.concat([buffer, data]);
@@ -403,9 +456,7 @@ export class NetworkingService extends EventEmitter {
       // Clean up dead connections
       for (const [userId, socket] of this.connections) {
         if (socket.destroyed) {
-          this.connections.delete(userId);
-          this.peers.delete(userId);
-          this.emit('peerLost', userId);
+          this.cleanupSocket(socket, 'heartbeat cleanup');
         }
       }
 

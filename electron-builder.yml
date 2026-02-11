@@ -7,8 +7,9 @@ directories:
   buildResources: build
 
 files:
-  - dist/**/*
-  - "!node_modules/**/*"
+  - dist/main/**/*
+  - dist/renderer/**/*
+  - dist/shared/**/*
 
 mac:
   category: public.app-category.productivity
