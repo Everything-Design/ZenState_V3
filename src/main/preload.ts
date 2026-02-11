@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   pickAvatarImage: () => ipcRenderer.invoke('dialog:pick-avatar-image'),
   connectToIP: (host: string, port: number) => ipcRenderer.invoke('network:connect-ip', { host, port }),
   getLocalInfo: () => ipcRenderer.invoke('network:get-local-info'),
+  checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
 
   // Send (fire-and-forget)
   updateStatus: (status: string) => ipcRenderer.send(IPC.UPDATE_STATUS, status),
@@ -87,6 +88,8 @@ contextBridge.exposeInMainWorld('zenstate', {
       IPC.EMERGENCY_REQUEST, IPC.EMERGENCY_ACCESS,
       IPC.TIMER_UPDATE,
       'alert-data',
+      'update:available',
+      'update:not-available',
       'update:downloaded',
     ];
     if (validChannels.includes(channel)) {

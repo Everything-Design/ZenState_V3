@@ -5,39 +5,8 @@ import MenuBarView from './views/MenuBarView';
 import SettingsView from './views/SettingsView';
 
 // Type declaration for the preload bridge
-declare global {
-  interface Window {
-    zenstate: {
-      getUser: () => Promise<User | null>;
-      saveUser: (user: User) => Promise<boolean>;
-      getPeers: () => Promise<User[]>;
-      updateStatus: (status: AvailabilityStatus) => void;
-      updateUser: (updates: Partial<User>) => void;
-      sendMeetingRequest: (userId: string, message?: string) => void;
-      cancelMeetingRequest: (userId: string) => void;
-      respondMeetingRequest: (userId: string, accepted: boolean, message?: string) => void;
-      sendEmergencyRequest: (userId: string, message?: string) => void;
-      grantEmergencyAccess: (userId: string, granted: boolean) => void;
-      startTimer: (taskLabel: string, category?: string) => void;
-      stopTimer: () => void;
-      pauseTimer: () => void;
-      resumeTimer: () => void;
-      openDashboard: () => void;
-      closePopover: () => void;
-      quit: () => void;
-      login: (user: User) => void;
-      getRecords: (month?: string) => Promise<unknown>;
-      deleteSession: (sessionId: string, date: string) => Promise<boolean>;
-      updateSession: (sessionId: string, date: string, updates: unknown) => Promise<boolean>;
-      exportCSV: (month: string) => Promise<string>;
-      getLoginItemSettings?: () => Promise<boolean>;
-      setLoginItemSettings?: (enabled: boolean) => void;
-      signOut?: () => void;
-      on: (channel: string, callback: (...args: unknown[]) => void) => void;
-      removeAllListeners: (channel: string) => void;
-    };
-  }
-}
+// Note: The canonical Window.zenstate declaration is in DashboardApp.tsx.
+// This file re-declares the same interface — they MUST stay in sync.
 
 type View = 'main' | 'settings';
 

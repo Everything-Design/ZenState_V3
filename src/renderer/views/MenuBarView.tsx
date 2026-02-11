@@ -125,6 +125,11 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
     setPendingRequests((prev) => ({ ...prev, [userId]: true }));
   }
 
+  function handleSendEmergencyRequest(userId: string) {
+    window.zenstate.sendEmergencyRequest(userId);
+    setPendingRequests((prev) => ({ ...prev, [userId]: true }));
+  }
+
   function handleCancelRequest(userId: string) {
     window.zenstate.cancelMeetingRequest(userId);
     setPendingRequests((prev) => {
@@ -362,13 +367,13 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
         </div>
         <div className="presence-counts">
           <div className="presence-count">
-            <span className="status-dot available" /> {presenceCounts.available} Available
+            <span className="status-dot available" /> {presenceCounts.available}
           </div>
           <div className="presence-count">
-            <span className="status-dot occupied" /> {presenceCounts.occupied} Occupied
+            <span className="status-dot occupied" /> {presenceCounts.occupied}
           </div>
           <div className="presence-count">
-            <span className="status-dot focused" /> {presenceCounts.focused} Focus
+            <span className="status-dot focused" /> {presenceCounts.focused}
           </div>
           <div className="spacer" />
           <span style={{ color: 'var(--zen-tertiary-text)' }}>{presenceCounts.total} online</span>
@@ -427,6 +432,16 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
                 >
                   Cancel
                 </button>
+              ) : peer.status === AvailabilityStatus.Focused ? (
+                (currentUser.canSendEmergency || currentUser.isAdmin) ? (
+                  <button
+                    className="btn btn-danger"
+                    style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
+                    onClick={() => handleSendEmergencyRequest(peer.id)}
+                  >
+                    🚨 Urgent
+                  </button>
+                ) : null
               ) : (
                 <button
                   className="btn btn-primary"

@@ -32,6 +32,7 @@ declare global {
       getAppVersion: () => Promise<string>;
       resetAllData: () => Promise<boolean>;
       installUpdate: () => void;
+      checkForUpdate: () => Promise<void>;
       getLoginItemSettings: () => Promise<boolean>;
       setLoginItemSettings: (enabled: boolean) => void;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;

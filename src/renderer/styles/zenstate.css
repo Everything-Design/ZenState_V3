@@ -211,10 +211,11 @@ body {
 
 .presence-counts {
   display: flex;
-  gap: var(--space-lg);
+  gap: var(--space-sm);
   margin-top: var(--space-sm);
   font-size: 11px;
   color: var(--zen-secondary-text);
+  white-space: nowrap;
 }
 
 .presence-count {

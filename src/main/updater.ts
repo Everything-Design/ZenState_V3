@@ -7,6 +7,16 @@ export function setupUpdater() {
 
   autoUpdater.on('update-available', (info) => {
     console.log(`Update available: ${info.version}`);
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('update:available', { version: info.version });
+    }
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('No updates available');
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('update:not-available');
+    }
   });
 
   autoUpdater.on('update-downloaded', (info) => {
@@ -28,4 +38,8 @@ export function setupUpdater() {
   setInterval(() => {
     autoUpdater.checkForUpdatesAndNotify();
   }, 4 * 60 * 60 * 1000);
+}
+
+export function checkForUpdate() {
+  autoUpdater.checkForUpdates();
 }

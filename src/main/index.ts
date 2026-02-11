@@ -6,7 +6,7 @@ import { createPopoverWindow, createDashboardWindow, createAlertWindow } from '.
 import { NetworkingService } from './networking/NetworkingService';
 import { PersistenceService } from './services/persistence';
 import { TimeTracker } from './services/timeTracker';
-import { setupUpdater } from './updater';
+import { setupUpdater, checkForUpdate } from './updater';
 import { IPC, AvailabilityStatus, User, MessageType } from '../shared/types';
 
 // ── Global Error Safety Net ─────────────────────────────────────
@@ -464,6 +464,11 @@ function setupIPC() {
   ipcMain.on('app:install-update', () => {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.quitAndInstall();
+  });
+
+  // Check for update (manual)
+  ipcMain.handle('app:check-for-update', async () => {
+    checkForUpdate();
   });
 
   // Categories

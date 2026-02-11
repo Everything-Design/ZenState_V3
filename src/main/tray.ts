@@ -26,7 +26,12 @@ function getIconsDir(): string {
 function createTrayIcon(status: AvailabilityStatus = AvailabilityStatus.Available): Electron.NativeImage {
   const filename = STATUS_ICON_MAP[status] || STATUS_ICON_MAP[AvailabilityStatus.Offline];
   const iconPath = path.join(getIconsDir(), filename);
-  const img = nativeImage.createFromPath(iconPath);
+  let img = nativeImage.createFromPath(iconPath);
+  if (process.platform === 'darwin') {
+    img = img.resize({ width: 18, height: 18 });
+  } else {
+    img = img.resize({ width: 16, height: 16 });
+  }
   img.setTemplateImage(false);
   return img;
 }

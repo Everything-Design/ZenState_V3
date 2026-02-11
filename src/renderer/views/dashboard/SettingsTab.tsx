@@ -3,6 +3,7 @@ import { Settings, Tag, Info, Shield, Wifi } from 'lucide-react';
 import { User } from '../../../shared/types';
 
 const COLOR_OPTIONS = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#5856D6', '#AF52DE', '#FF2D55', '#8E8E93'];
+const EMOJI_OPTIONS = ['😊', '😎', '🚀', '🎯', '🔥', '💡', '🎨', '🎵', '🌟', '⚡', '🦊', '🐱', '🌈', '🍀', '🎮', '🏀', '📚', '🧠', '💻', '☕'];
 
 interface Props {
   currentUser: User;
@@ -21,6 +22,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [nameInput, setNameInput] = useState(currentUser.name);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'not-available' | 'downloaded'>('idle');
 
   // Avatar mode: 'photo' | 'initial' | 'emoji'
   const [avatarMode, setAvatarMode] = useState<'photo' | 'initial' | 'emoji'>(
@@ -53,7 +55,30 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     (window as any).zenstate.getLocalInfo?.().then((info: { addresses: string[]; port: number }) => {
       setLocalInfo(info);
     }).catch(() => {});
+
+    // Listen for update events
+    (window as any).zenstate.on('update:available', () => {
+      setUpdateStatus('available');
+    });
+    (window as any).zenstate.on('update:not-available', () => {
+      setUpdateStatus('not-available');
+      setTimeout(() => setUpdateStatus('idle'), 3000);
+    });
+    (window as any).zenstate.on('update:downloaded', () => {
+      setUpdateStatus('downloaded');
+    });
+
+    return () => {
+      (window as any).zenstate.removeAllListeners?.('update:available');
+      (window as any).zenstate.removeAllListeners?.('update:not-available');
+      (window as any).zenstate.removeAllListeners?.('update:downloaded');
+    };
   }, []);
+
+  function handleCheckForUpdate() {
+    setUpdateStatus('checking');
+    (window as any).zenstate.checkForUpdate?.();
+  }
 
   function handleNameSave() {
     if (nameInput.trim() && nameInput.trim() !== currentUser.name) {
@@ -89,6 +114,11 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   function handleUseInitial() {
     onUserUpdate({ avatarImageData: undefined, avatarEmoji: undefined });
     setAvatarMode('initial');
+  }
+
+  function handleEmojiSelect(emoji: string) {
+    onUserUpdate({ avatarEmoji: emoji, avatarImageData: undefined });
+    setAvatarMode('emoji');
   }
 
   function handleAddCategory() {
@@ -253,7 +283,38 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
               >
                 Upload Photo
               </button>
+              <button
+                className={`btn ${avatarMode === 'emoji' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, fontSize: 11 }}
+                onClick={() => setAvatarMode('emoji')}
+              >
+                Emoji
+              </button>
             </div>
+            {avatarMode === 'emoji' && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 4 }}>
+                {EMOJI_OPTIONS.map((emoji) => (
+                  <button
+                    key={emoji}
+                    onClick={() => handleEmojiSelect(emoji)}
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 6,
+                      border: currentUser.avatarEmoji === emoji ? '2px solid var(--zen-primary)' : '1px solid var(--zen-divider)',
+                      background: currentUser.avatarEmoji === emoji ? 'rgba(0, 122, 255, 0.15)' : 'var(--zen-tertiary-bg)',
+                      cursor: 'pointer',
+                      fontSize: 16,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Color Picker */}
@@ -496,6 +557,32 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           </div>
           <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 24 }}>
             App by Everything Flow and Everything Design
+          </div>
+
+          {/* Check for Update */}
+          <div style={{ marginBottom: 16 }}>
+            {updateStatus === 'idle' && (
+              <button className="btn btn-secondary" onClick={handleCheckForUpdate}>
+                Check for Update
+              </button>
+            )}
+            {updateStatus === 'checking' && (
+              <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>Checking for updates...</span>
+            )}
+            {updateStatus === 'available' && (
+              <span style={{ fontSize: 12, color: 'var(--zen-primary)' }}>Downloading update...</span>
+            )}
+            {updateStatus === 'not-available' && (
+              <span style={{ fontSize: 12, color: 'var(--status-available)' }}>You're up to date</span>
+            )}
+            {updateStatus === 'downloaded' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--status-available)' }}>Update ready — Restart to update</span>
+                <button className="btn btn-primary" onClick={() => (window as any).zenstate.installUpdate()}>
+                  Restart Now
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="divider" />
