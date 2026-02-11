@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import net from 'net';
 import dgram from 'dgram';
+import os from 'os';
 import Bonjour, { Service } from 'bonjour-service';
 import { User, PeerMessage, MessageType } from '../../shared/types';
 
@@ -35,6 +36,7 @@ export class NetworkingService extends EventEmitter {
   private beaconListener: dgram.Socket | null = null;
 
   private pendingRetries = new Map<string, number>(); // endpoint → retry count
+  private pendingConnections = new Set<string>(); // endpoints currently connecting
 
   constructor(user: User) {
     super();
@@ -86,6 +88,7 @@ export class NetworkingService extends EventEmitter {
     }
     this.connections.clear();
     this.peers.clear();
+    this.pendingConnections.clear();
 
     this.tcpServer?.close();
   }
@@ -97,6 +100,38 @@ export class NetworkingService extends EventEmitter {
 
   getPeers(): User[] {
     return Array.from(this.peers.values());
+  }
+
+  /**
+   * Manually connect to a peer by IP address and port.
+   * Used as a fallback when auto-discovery fails.
+   */
+  connectToIP(host: string, port: number) {
+    console.log(`Manual connection requested to ${host}:${port}`);
+    this.connectToEndpoint(host, port);
+  }
+
+  /**
+   * Returns the TCP port this instance is listening on.
+   */
+  getTCPPort(): number {
+    return this.tcpPort;
+  }
+
+  /**
+   * Returns all non-internal IPv4 addresses on this machine.
+   */
+  getLocalAddresses(): string[] {
+    const interfaces = os.networkInterfaces();
+    const addresses: string[] = [];
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          addresses.push(iface.address);
+        }
+      }
+    }
+    return addresses;
   }
 
   sendMeetingRequest(userId: string, message?: string) {
@@ -193,50 +228,76 @@ export class NetworkingService extends EventEmitter {
   // ── Bonjour (replaces NWBrowser) ─────────────────────────────
 
   private startBonjour() {
-    this.bonjour = new Bonjour();
+    try {
+      this.bonjour = new Bonjour();
 
-    // Advertise our service (replaces NWListener.Service)
-    const serviceName = `${this.currentUser.id.substring(0, 8)}_${this.currentUser.username}`;
-    this.bonjourService = this.bonjour.publish({
-      name: serviceName,
-      type: SERVICE_TYPE,
-      port: this.tcpPort,
-      protocol: 'tcp',
-    }) as unknown as Service;
+      // Advertise our service (replaces NWListener.Service)
+      const serviceName = `${this.currentUser.id.substring(0, 8)}_${this.currentUser.username}`;
+      this.bonjourService = this.bonjour.publish({
+        name: serviceName,
+        type: SERVICE_TYPE,
+        port: this.tcpPort,
+        protocol: 'tcp',
+      }) as unknown as Service;
 
-    // Browse for peers (replaces NWBrowser)
-    this.bonjourBrowser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
+      // Browse for peers (replaces NWBrowser)
+      this.bonjourBrowser = this.bonjour.find({ type: SERVICE_TYPE, protocol: 'tcp' });
 
-    this.bonjourBrowser.on('up', (service: Service) => {
-      // Filter out self
-      const selfPrefix = this.currentUser.id.substring(0, 8);
-      if (service.name?.startsWith(selfPrefix)) return;
+      this.bonjourBrowser.on('up', (service: Service) => {
+        // Filter out self
+        const selfPrefix = this.currentUser.id.substring(0, 8);
+        if (service.name?.startsWith(selfPrefix)) return;
 
-      console.log(`Bonjour: discovered service ${service.name} at ${service.host}:${service.port}`);
-      this.connectToEndpoint(service.host!, service.port);
-    });
+        console.log(`Bonjour: discovered service ${service.name} at ${service.host}:${service.port}`);
+        this.connectToEndpoint(service.host!, service.port);
+      });
 
-    this.bonjourBrowser.on('down', (service: Service) => {
-      // Find which peer this was and remove them
-      for (const [userId, peer] of this.peers) {
-        if (service.name?.startsWith(peer.id.substring(0, 8))) {
-          const socket = this.connections.get(userId);
-          if (socket) this.cleanupSocket(socket, 'bonjour down');
-          break;
+      this.bonjourBrowser.on('down', (service: Service) => {
+        // Find which peer this was and remove them
+        for (const [userId, peer] of this.peers) {
+          if (service.name?.startsWith(peer.id.substring(0, 8))) {
+            const socket = this.connections.get(userId);
+            if (socket) this.cleanupSocket(socket, 'bonjour down');
+            break;
+          }
         }
-      }
-    });
+      });
+    } catch (err) {
+      console.error('Bonjour initialization failed (mDNS may be unavailable):', err);
+      // Continue with beacon-only discovery
+    }
   }
 
   // ── Connect to Endpoint (replaces connectToEndpoint) ─────────
 
-  private connectToEndpoint(host: string, port: number) {
-    const endpointKey = `${host}:${port}`;
+  /**
+   * Normalize IPv6-mapped addresses: strip ::ffff: prefix
+   */
+  private normalizeHost(host: string): string {
+    return host.replace(/^::ffff:/, '');
+  }
 
+  private connectToEndpoint(host: string, port: number) {
+    const normalizedHost = this.normalizeHost(host);
+    const endpointKey = `${normalizedHost}:${port}`;
+
+    // Prevent duplicate connection attempts
+    if (this.pendingConnections.has(endpointKey)) return;
+
+    // Check if we already have a live connection to this endpoint
+    for (const socket of this.connections.values()) {
+      if (!socket.destroyed) {
+        const remoteAddr = this.normalizeHost(socket.remoteAddress || '');
+        if (remoteAddr === normalizedHost && socket.remotePort === port) return;
+      }
+    }
+
+    this.pendingConnections.add(endpointKey);
     const socket = new net.Socket();
 
     socket.connect(port, host, () => {
       console.log(`Connected to ${endpointKey}`);
+      this.pendingConnections.delete(endpointKey);
       this.pendingRetries.delete(endpointKey);
       this.sendUserInfo(socket);
       this.setupSocketReceiver(socket);
@@ -244,6 +305,7 @@ export class NetworkingService extends EventEmitter {
 
     socket.on('error', (err) => {
       console.log(`Socket error for ${endpointKey}: ${err.message}`);
+      this.pendingConnections.delete(endpointKey);
 
       // Check if this socket has a peer association (post-connection)
       const hasPeer = Array.from(this.connections.values()).includes(socket);
@@ -265,6 +327,7 @@ export class NetworkingService extends EventEmitter {
     });
 
     socket.on('close', () => {
+      this.pendingConnections.delete(endpointKey);
       this.cleanupSocket(socket, `close:${endpointKey}`);
     });
   }

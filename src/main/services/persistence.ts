@@ -45,6 +45,10 @@ export class PersistenceService {
     return store.get('categories') as string[];
   }
 
+  saveCategories(categories: string[]): void {
+    store.set('categories', categories);
+  }
+
   getSchedules(): FocusSchedule[] {
     return store.get('focusSchedules') as FocusSchedule[];
   }

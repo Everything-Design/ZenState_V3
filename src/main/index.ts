@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage, dialog } from 'electron';
+import fs from 'fs';
 import path from 'path';
 import { createTray, updateTrayIcon } from './tray';
 import { createPopoverWindow, createDashboardWindow, createAlertWindow } from './windows';
@@ -463,6 +464,49 @@ function setupIPC() {
   ipcMain.on('app:install-update', () => {
     const { autoUpdater } = require('electron-updater');
     autoUpdater.quitAndInstall();
+  });
+
+  // Categories
+  ipcMain.handle('data:get-categories', () => {
+    return persistence.getCategories();
+  });
+  ipcMain.handle('data:save-categories', (_e, categories: string[]) => {
+    persistence.saveCategories(categories);
+    return true;
+  });
+
+  // Avatar photo picker
+  ipcMain.handle('dialog:pick-avatar-image', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    const filePath = result.filePaths[0];
+    const fileData = fs.readFileSync(filePath);
+    const img = nativeImage.createFromBuffer(fileData);
+    const resized = img.resize({ width: 128, height: 128 });
+    return resized.toPNG().toString('base64');
+  });
+
+  // Network: manual IP connection
+  ipcMain.handle('network:connect-ip', (_e, data: { host: string; port: number }) => {
+    if (networking) {
+      networking.connectToIP(data.host, data.port);
+      return true;
+    }
+    return false;
+  });
+
+  // Network: get local info
+  ipcMain.handle('network:get-local-info', () => {
+    if (networking) {
+      return {
+        addresses: networking.getLocalAddresses(),
+        port: networking.getTCPPort(),
+      };
+    }
+    return { addresses: [], port: 0 };
   });
 }
 

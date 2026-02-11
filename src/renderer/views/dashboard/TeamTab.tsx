@@ -39,15 +39,20 @@ export default function TeamTab({ currentUser, peers }: Props) {
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
 
-  const allMembers = useMemo(() => [currentUser, ...peers], [currentUser, peers]);
+  // Online peers only (hide offline)
+  const onlinePeers = useMemo(() => {
+    return peers.filter((p) => p.status !== AvailabilityStatus.Offline);
+  }, [peers]);
+
+  const allMembers = useMemo(() => [currentUser, ...onlinePeers], [currentUser, onlinePeers]);
 
   const filteredMembers = useMemo(() => {
-    if (!searchText) return peers;
+    if (!searchText) return onlinePeers;
     const q = searchText.toLowerCase();
-    return peers.filter(
+    return onlinePeers.filter(
       (p) => p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q)
     );
-  }, [peers, searchText]);
+  }, [onlinePeers, searchText]);
 
   const presenceCounts = useMemo(() => ({
     available: allMembers.filter((u) => u.status === AvailabilityStatus.Available).length,
@@ -137,7 +142,7 @@ export default function TeamTab({ currentUser, peers }: Props) {
       </div>
 
       {/* Search */}
-      {peers.length > 3 && (
+      {onlinePeers.length > 3 && (
         <div style={{ marginBottom: 16 }}>
           <input
             className="text-input"
@@ -152,7 +157,7 @@ export default function TeamTab({ currentUser, peers }: Props) {
       <div className="team-grid">
         {filteredMembers.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--zen-tertiary-text)' }}>
-            {peers.length === 0 ? 'No team members found on this network' : 'No matches'}
+            {onlinePeers.length === 0 ? 'No team members online' : 'No matches'}
           </div>
         ) : (
           filteredMembers.map((peer) => (
@@ -176,7 +181,13 @@ export default function TeamTab({ currentUser, peers }: Props) {
                     borderRadius: '50%',
                     border: `2.5px solid ${getStatusColor(peer.status)}`,
                   }} />
-                  {peer.avatarEmoji || '👤'}
+                  {peer.avatarImageData ? (
+                    <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                  ) : peer.avatarEmoji ? (
+                    peer.avatarEmoji
+                  ) : (
+                    <span style={{ fontSize: 16, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
+                  )}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

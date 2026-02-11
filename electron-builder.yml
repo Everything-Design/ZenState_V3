@@ -11,6 +11,10 @@ files:
   - dist/renderer/**/*
   - dist/shared/**/*
 
+extraResources:
+  - from: "build/icons"
+    to: "icons"
+
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns

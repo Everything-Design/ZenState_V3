@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('zenstate', {
   exportCSV: (month: string) => ipcRenderer.invoke(IPC.EXPORT_CSV, month),
   getAppVersion: () => ipcRenderer.invoke('app:get-version'),
   resetAllData: () => ipcRenderer.invoke('data:reset-all'),
+  getCategories: () => ipcRenderer.invoke('data:get-categories'),
+  saveCategories: (categories: string[]) => ipcRenderer.invoke('data:save-categories', categories),
+  pickAvatarImage: () => ipcRenderer.invoke('dialog:pick-avatar-image'),
+  connectToIP: (host: string, port: number) => ipcRenderer.invoke('network:connect-ip', { host, port }),
+  getLocalInfo: () => ipcRenderer.invoke('network:get-local-info'),
 
   // Send (fire-and-forget)
   updateStatus: (status: string) => ipcRenderer.send(IPC.UPDATE_STATUS, status),

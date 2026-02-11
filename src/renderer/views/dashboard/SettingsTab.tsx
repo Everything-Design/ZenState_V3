@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Tag, UserCircle, Info, Shield } from 'lucide-react';
+import { Settings, Tag, Info, Shield, Wifi } from 'lucide-react';
 import { User } from '../../../shared/types';
 
-const EMOJI_OPTIONS = ['😊', '😎', '🚀', '🎯', '🔥', '💡', '🎨', '🎵', '🌟', '⚡', '🦊', '🐱', '🌈', '🍀', '🎮', '🏀', '📚', '🧠', '💻', '☕'];
 const COLOR_OPTIONS = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#5856D6', '#AF52DE', '#FF2D55', '#8E8E93'];
-const CATEGORY_LIST = ['Development', 'Design', 'Meetings', 'Writing', 'Research', 'Planning', 'Admin', 'Other'];
 
 interface Props {
   currentUser: User;
@@ -13,7 +11,7 @@ interface Props {
   onSignOut: () => void;
 }
 
-type SettingsSection = 'general' | 'categories' | 'account' | 'about' | 'admin';
+type SettingsSection = 'general' | 'categories' | 'network' | 'about' | 'admin';
 
 export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOut }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
@@ -24,6 +22,20 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
+  // Avatar mode: 'photo' | 'initial' | 'emoji'
+  const [avatarMode, setAvatarMode] = useState<'photo' | 'initial' | 'emoji'>(
+    currentUser.avatarImageData ? 'photo' : currentUser.avatarEmoji ? 'emoji' : 'initial'
+  );
+
+  // Categories
+  const [categories, setCategories] = useState<string[]>([]);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+
+  // Network
+  const [localInfo, setLocalInfo] = useState<{ addresses: string[]; port: number }>({ addresses: [], port: 0 });
+  const [connectIpInput, setConnectIpInput] = useState('');
+  const [connectStatus, setConnectStatus] = useState('');
+
   const isAdmin = currentUser.username.toLowerCase() === 'saurabh';
 
   useEffect(() => {
@@ -32,6 +44,14 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     }).catch(() => {});
     (window as any).zenstate.getAppVersion?.().then((v: string) => {
       setAppVersion(v);
+    }).catch(() => {});
+    // Load categories
+    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
+      setCategories(cats || []);
+    }).catch(() => {});
+    // Load network info
+    (window as any).zenstate.getLocalInfo?.().then((info: { addresses: string[]; port: number }) => {
+      setLocalInfo(info);
     }).catch(() => {});
   }, []);
 
@@ -55,14 +75,89 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   async function handleResetApp() {
     await (window as any).zenstate.resetAllData();
     setShowResetConfirm(false);
-    // Sign out after reset
     onSignOut();
+  }
+
+  async function handlePickPhoto() {
+    const base64 = await (window as any).zenstate.pickAvatarImage();
+    if (base64) {
+      onUserUpdate({ avatarImageData: base64, avatarEmoji: undefined });
+      setAvatarMode('photo');
+    }
+  }
+
+  function handleUseInitial() {
+    onUserUpdate({ avatarImageData: undefined, avatarEmoji: undefined });
+    setAvatarMode('initial');
+  }
+
+  function handleAddCategory() {
+    const cat = newCategoryInput.trim();
+    if (!cat || categories.includes(cat)) return;
+    const updated = [...categories, cat];
+    setCategories(updated);
+    (window as any).zenstate.saveCategories(updated);
+    setNewCategoryInput('');
+  }
+
+  function handleDeleteCategory(cat: string) {
+    const updated = categories.filter((c) => c !== cat);
+    setCategories(updated);
+    (window as any).zenstate.saveCategories(updated);
+  }
+
+  async function handleConnectIP() {
+    const input = connectIpInput.trim();
+    if (!input) return;
+    // Parse host:port
+    const parts = input.split(':');
+    const host = parts[0];
+    const port = parseInt(parts[1] || '0', 10);
+    if (!host || isNaN(port) || port <= 0) {
+      setConnectStatus('Invalid format. Use IP:Port');
+      return;
+    }
+    try {
+      await (window as any).zenstate.connectToIP(host, port);
+      setConnectStatus('Connection initiated');
+      setConnectIpInput('');
+      setTimeout(() => setConnectStatus(''), 3000);
+    } catch {
+      setConnectStatus('Connection failed');
+    }
+  }
+
+  // Render current avatar
+  function renderAvatar(size: number, fontSize: number) {
+    return (
+      <div style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: currentUser.avatarColor || '#007AFF',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize,
+        overflow: 'hidden',
+      }}>
+        {currentUser.avatarImageData ? (
+          <img src={`data:image/png;base64,${currentUser.avatarImageData}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        ) : currentUser.avatarEmoji ? (
+          currentUser.avatarEmoji
+        ) : (
+          <span style={{ fontSize: fontSize * 0.7, fontWeight: 700, color: 'white' }}>
+            {currentUser.name.charAt(0).toUpperCase()}
+          </span>
+        )}
+      </div>
+    );
   }
 
   const sections: { id: SettingsSection; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: <Settings size={16} /> },
     { id: 'categories', label: 'Categories', icon: <Tag size={16} /> },
-    { id: 'account', label: 'Account', icon: <UserCircle size={16} /> },
+    { id: 'network', label: 'Network', icon: <Wifi size={16} /> },
     { id: 'about', label: 'About', icon: <Info size={16} /> },
     { id: 'admin', label: 'Admin', icon: <Shield size={16} />, adminOnly: true },
   ];
@@ -115,18 +210,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           {/* Profile */}
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Profile</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: '50%',
-              background: currentUser.avatarColor || '#007AFF',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 28,
-            }}>
-              {currentUser.avatarEmoji || '😊'}
-            </div>
+            {renderAvatar(56, 28)}
             <div>
               {editingName ? (
                 <input
@@ -151,30 +235,24 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
             </div>
           </div>
 
-          {/* Emoji Picker */}
+          {/* Avatar Mode Selector */}
           <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Avatar Emoji</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {EMOJI_OPTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  onClick={() => onUserUpdate({ avatarEmoji: emoji })}
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: 6,
-                    border: currentUser.avatarEmoji === emoji ? '2px solid var(--zen-primary)' : '1px solid var(--zen-divider)',
-                    background: currentUser.avatarEmoji === emoji ? 'rgba(0, 122, 255, 0.15)' : 'var(--zen-tertiary-bg)',
-                    cursor: 'pointer',
-                    fontSize: 16,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {emoji}
-                </button>
-              ))}
+            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 8 }}>Avatar Style</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button
+                className={`btn ${avatarMode === 'initial' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, fontSize: 11 }}
+                onClick={handleUseInitial}
+              >
+                Initial Letter
+              </button>
+              <button
+                className={`btn ${avatarMode === 'photo' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, fontSize: 11 }}
+                onClick={handlePickPhoto}
+              >
+                Upload Photo
+              </button>
             </div>
           </div>
 
@@ -203,7 +281,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           <div className="divider" />
 
           {/* Launch at Login */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
             <span style={{ fontSize: 13, flex: 1 }}>Launch at Login</span>
             <button
               onClick={handleToggleLaunchAtLogin}
@@ -231,69 +309,12 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
               }} />
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Categories Section */}
-      {activeSection === 'categories' && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {CATEGORY_LIST.map((cat) => (
-              <div key={cat} style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                background: 'var(--zen-tertiary-bg)',
-                border: '1px solid var(--zen-divider)',
-                fontSize: 12,
-                color: 'var(--zen-secondary-text)',
-              }}>
-                {cat}
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
-            Categories are used to organize your focus sessions and time tracking.
-          </div>
-        </div>
-      )}
-
-      {/* Account Section */}
-      {activeSection === 'account' && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Account</div>
-
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            <div style={{
-              flex: 1,
-              padding: 12,
-              background: 'var(--zen-tertiary-bg)',
-              borderRadius: 8,
-              textAlign: 'center',
-            }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--zen-primary)', fontFamily: 'var(--font-mono)' }}>
-                {Math.floor(currentUser.totalFocusTime / 3600)}h {Math.floor((currentUser.totalFocusTime % 3600) / 60)}m
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--zen-secondary-text)', marginTop: 4 }}>Total Focus Time</div>
-            </div>
-            <div style={{
-              flex: 1,
-              padding: 12,
-              background: 'var(--zen-tertiary-bg)',
-              borderRadius: 8,
-              textAlign: 'center',
-            }}>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--zen-text)' }}>
-                {currentUser.focusSessionCount}
-              </div>
-              <div style={{ fontSize: 10, color: 'var(--zen-secondary-text)', marginTop: 4 }}>Sessions</div>
-            </div>
-          </div>
 
           <div className="divider" />
 
+          {/* Sign Out */}
           {showSignOutConfirm ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
               <span style={{ fontSize: 12, color: 'var(--status-focused)', flex: 1 }}>Are you sure?</span>
               <button className="btn btn-secondary" onClick={() => setShowSignOutConfirm(false)}>Cancel</button>
               <button className="btn btn-danger" onClick={onSignOut}>Sign Out</button>
@@ -301,12 +322,143 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           ) : (
             <button
               className="btn btn-danger"
-              style={{ width: '100%' }}
+              style={{ width: '100%', marginTop: 8 }}
               onClick={() => setShowSignOutConfirm(true)}
             >
               Sign Out
             </button>
           )}
+        </div>
+      )}
+
+      {/* Categories Section */}
+      {activeSection === 'categories' && (
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {categories.map((cat) => (
+              <div key={cat} style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                background: 'var(--zen-tertiary-bg)',
+                border: '1px solid var(--zen-divider)',
+                fontSize: 12,
+                color: 'var(--zen-secondary-text)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                {cat}
+                <button
+                  onClick={() => handleDeleteCategory(cat)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--zen-tertiary-text)',
+                    fontSize: 14,
+                    padding: 0,
+                    lineHeight: 1,
+                    fontFamily: 'inherit',
+                  }}
+                  title="Remove category"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Add category */}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="text-input"
+              placeholder="New category..."
+              value={newCategoryInput}
+              onChange={(e) => setNewCategoryInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 11 }}
+              onClick={handleAddCategory}
+              disabled={!newCategoryInput.trim()}
+            >
+              + Add
+            </button>
+          </div>
+
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
+            Categories are used to organize your focus sessions and time tracking.
+          </div>
+        </div>
+      )}
+
+      {/* Network Section */}
+      {activeSection === 'network' && (
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Network</div>
+
+          {/* Local IP display */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Your Address</div>
+            {localInfo.addresses.length > 0 ? (
+              localInfo.addresses.map((addr) => (
+                <div key={addr} style={{
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                  background: 'var(--zen-tertiary-bg)',
+                  border: '1px solid var(--zen-divider)',
+                  fontSize: 13,
+                  fontFamily: 'var(--font-mono)',
+                  marginBottom: 4,
+                }}>
+                  {addr}:{localInfo.port}
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--zen-tertiary-text)' }}>
+                Not connected to a network
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 4 }}>
+              Share this address with team members who can't auto-discover you.
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          {/* Manual connect */}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Connect to Peer</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                className="text-input"
+                placeholder="IP:Port (e.g. 192.168.1.5:54321)"
+                value={connectIpInput}
+                onChange={(e) => setConnectIpInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConnectIP(); }}
+                style={{ flex: 1, fontSize: 12 }}
+              />
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 11 }}
+                onClick={handleConnectIP}
+                disabled={!connectIpInput.trim()}
+              >
+                Connect
+              </button>
+            </div>
+            {connectStatus && (
+              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 6 }}>
+                {connectStatus}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 8 }}>
+              Use this to manually connect to a team member when auto-discovery isn't working.
+            </div>
+          </div>
         </div>
       )}
 
@@ -393,8 +545,15 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: 14,
+                  overflow: 'hidden',
                 }}>
-                  {peer.avatarEmoji || '👤'}
+                  {peer.avatarImageData ? (
+                    <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : peer.avatarEmoji ? (
+                    peer.avatarEmoji
+                  ) : (
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
+                  )}
                 </div>
                 <span style={{ fontSize: 13, flex: 1 }}>{peer.name}</span>
                 <button

@@ -60,24 +60,30 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [showStatusMessage, setShowStatusMessage] = useState(false);
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
+  const [pendingRequests, setPendingRequests] = useState<Record<string, boolean>>({});
 
-  // Presence counts
+  // Online peers only (hide offline)
+  const onlinePeers = useMemo(() => {
+    return peers.filter((p) => p.status !== AvailabilityStatus.Offline);
+  }, [peers]);
+
+  // Presence counts (online only)
   const presenceCounts = useMemo(() => {
-    const all = [currentUser, ...peers];
+    const all = [currentUser, ...onlinePeers];
     return {
       available: all.filter((u) => u.status === AvailabilityStatus.Available).length,
       occupied: all.filter((u) => u.status === AvailabilityStatus.Occupied).length,
       focused: all.filter((u) => u.status === AvailabilityStatus.Focused).length,
       total: all.length,
     };
-  }, [currentUser, peers]);
+  }, [currentUser, onlinePeers]);
 
   // Filtered team members
   const filteredPeers = useMemo(() => {
-    if (!searchText) return peers;
+    if (!searchText) return onlinePeers;
     const q = searchText.toLowerCase();
-    return peers.filter((p) => p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q));
-  }, [peers, searchText]);
+    return onlinePeers.filter((p) => p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q));
+  }, [onlinePeers, searchText]);
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
 
@@ -112,6 +118,19 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
       statusMessageExpiry: undefined,
     });
     setShowStatusMessage(false);
+  }
+
+  function handleSendRequest(userId: string) {
+    window.zenstate.sendMeetingRequest(userId);
+    setPendingRequests((prev) => ({ ...prev, [userId]: true }));
+  }
+
+  function handleCancelRequest(userId: string) {
+    window.zenstate.cancelMeetingRequest(userId);
+    setPendingRequests((prev) => {
+      const { [userId]: _, ...rest } = prev;
+      return rest;
+    });
   }
 
   // ── Status Message Input View ───────
@@ -255,7 +274,13 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
       <div className="user-header">
         <div className="avatar" style={{ background: currentUser.avatarColor || '#007AFF' }}>
           <div className={`status-ring ${currentUser.status}`} />
-          <span>{currentUser.avatarEmoji || '😊'}</span>
+          {currentUser.avatarImageData ? (
+            <img src={`data:image/png;base64,${currentUser.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+          ) : currentUser.avatarEmoji ? (
+            <span>{currentUser.avatarEmoji}</span>
+          ) : (
+            <span style={{ fontSize: 16, fontWeight: 600, color: 'white' }}>{currentUser.name.charAt(0).toUpperCase()}</span>
+          )}
         </div>
         <div className="user-info">
           <div className="user-name">{currentUser.name}</div>
@@ -353,7 +378,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
       <div className="divider" style={{ margin: '0 16px' }} />
 
       {/* Search */}
-      {peers.length > 3 && (
+      {onlinePeers.length > 3 && (
         <div style={{ padding: '4px 16px' }}>
           <input
             className="search-input"
@@ -368,13 +393,19 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
       <div className="team-list">
         {filteredPeers.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 20, color: 'var(--zen-tertiary-text)', fontSize: 12 }}>
-            {peers.length === 0 ? 'No team members found on this network' : 'No matches'}
+            {onlinePeers.length === 0 ? 'No team members online' : 'No matches'}
           </div>
         ) : (
           filteredPeers.map((peer) => (
             <div key={peer.id} className="team-member-row">
               <div className="member-avatar" style={{ background: peer.avatarColor || '#8E8E93' }}>
-                {peer.avatarEmoji || '👤'}
+                {peer.avatarImageData ? (
+                  <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                ) : peer.avatarEmoji ? (
+                  peer.avatarEmoji
+                ) : (
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
+                )}
               </div>
               <div className="member-info">
                 <div className="member-name">{peer.name}</div>
@@ -388,6 +419,23 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
                   </div>
                 )}
               </div>
+              {pendingRequests[peer.id] ? (
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
+                  onClick={() => handleCancelRequest(peer.id)}
+                >
+                  Cancel
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
+                  onClick={() => handleSendRequest(peer.id)}
+                >
+                  Request
+                </button>
+              )}
               <span className={`status-dot ${peer.status}`} />
             </div>
           ))

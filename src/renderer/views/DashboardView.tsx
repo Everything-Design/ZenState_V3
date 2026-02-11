@@ -85,7 +85,13 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             flexShrink: 0,
           }}>
             <div className={`status-ring ${currentUser.status}`} />
-            <span>{currentUser.avatarEmoji || '😊'}</span>
+            {currentUser.avatarImageData ? (
+              <img src={`data:image/png;base64,${currentUser.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+            ) : currentUser.avatarEmoji ? (
+              <span>{currentUser.avatarEmoji}</span>
+            ) : (
+              <span style={{ fontSize: 18, fontWeight: 600, color: 'white' }}>{currentUser.name.charAt(0).toUpperCase()}</span>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

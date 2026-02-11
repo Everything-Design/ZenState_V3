@@ -65,7 +65,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 export default function TimesheetTab({ records, onRefreshRecords }: Props) {
-  const [statPeriod, setStatPeriod] = useState<StatPeriod>('month');
+  const [statPeriod, setStatPeriod] = useState<StatPeriod>('today');
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showCalendar, setShowCalendar] = useState(true);
@@ -202,13 +202,13 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <span className="card-title" style={{ margin: 0 }}>Statistics</span>
           <div className="spacer" />
-          {(['all', 'month', 'week', 'today'] as StatPeriod[]).map((period) => (
+          {(['today', 'week', 'month', 'all'] as StatPeriod[]).map((period) => (
             <button
               key={period}
               className={`category-chip ${statPeriod === period ? 'selected' : ''}`}
               onClick={() => setStatPeriod(period)}
             >
-              {period === 'all' ? 'All Time' : period === 'month' ? 'This Month' : period === 'week' ? 'This Week' : 'Today'}
+              {period === 'today' ? 'Today' : period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time'}
             </button>
           ))}
         </div>
