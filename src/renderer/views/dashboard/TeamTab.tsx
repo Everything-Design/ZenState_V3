@@ -253,6 +253,27 @@ export default function TeamTab({ currentUser, peers }: Props) {
                   >
                     Wait {cooldowns[peer.id]}s
                   </button>
+                ) : peer.status === AvailabilityStatus.Focused ? (
+                  // Focused users: only show emergency button for authorized users
+                  (currentUser.canSendEmergency || currentUser.isAdmin) && (
+                    cooldowns[`emergency_${peer.id}`] ? (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ flex: 1, fontSize: 10 }}
+                        disabled
+                      >
+                        Wait {cooldowns[`emergency_${peer.id}`]}s
+                      </button>
+                    ) : (
+                      <button
+                        className="btn btn-danger"
+                        style={{ flex: 1, fontSize: 10 }}
+                        onClick={() => handleSendEmergency(peer.id)}
+                      >
+                        🚨 Emergency Request
+                      </button>
+                    )
+                  )
                 ) : (
                   <button
                     className="btn btn-primary"
@@ -263,28 +284,6 @@ export default function TeamTab({ currentUser, peers }: Props) {
                     }}
                   >
                     💬 Request Meeting
-                  </button>
-                )}
-
-                {peer.status === AvailabilityStatus.Focused &&
-                 (currentUser.canSendEmergency || currentUser.isAdmin) &&
-                 !cooldowns[`emergency_${peer.id}`] && (
-                  <button
-                    className="btn btn-danger"
-                    style={{ fontSize: 10 }}
-                    onClick={() => handleSendEmergency(peer.id)}
-                  >
-                    🚨
-                  </button>
-                )}
-
-                {cooldowns[`emergency_${peer.id}`] && (
-                  <button
-                    className="btn btn-secondary"
-                    style={{ fontSize: 10 }}
-                    disabled
-                  >
-                    {cooldowns[`emergency_${peer.id}`]}s
                   </button>
                 )}
               </div>

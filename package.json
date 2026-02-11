@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "3.0.6",
+  "version": "3.0.7",
   "description": "Team presence & availability — know when your teammates are free, focused, or busy",
   "main": "dist/main/index.js",
   "scripts": {

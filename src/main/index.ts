@@ -184,6 +184,12 @@ function startNetworking(user: User) {
   });
 
   networking.on('emergencyAccess', (granted: boolean) => {
+    // Persist the updated canSendEmergency flag on this user
+    const user = persistence.getUser();
+    if (user) {
+      user.canSendEmergency = granted;
+      persistence.saveUser(user);
+    }
     broadcastToWindows(IPC.EMERGENCY_ACCESS, granted);
   });
 

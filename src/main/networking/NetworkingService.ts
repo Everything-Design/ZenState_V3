@@ -174,6 +174,14 @@ export class NetworkingService extends EventEmitter {
   }
 
   grantEmergencyAccess(userId: string, granted: boolean) {
+    // Update local peer record so admin UI reflects the change immediately
+    const peer = this.peers.get(userId);
+    if (peer) {
+      peer.canSendEmergency = granted;
+      this.peers.set(userId, peer);
+      this.emit('peerUpdated', peer);
+    }
+
     this.sendPeerMessage(userId, {
       type: MessageType.EmergencyAccessGrant,
       senderId: this.currentUser.id,
@@ -486,9 +494,12 @@ export class NetworkingService extends EventEmitter {
         });
         break;
 
-      case MessageType.EmergencyAccessGrant:
-        this.emit('emergencyAccess', message.requestMessage === 'granted');
+      case MessageType.EmergencyAccessGrant: {
+        const granted = message.requestMessage === 'granted';
+        this.currentUser.canSendEmergency = granted;
+        this.emit('emergencyAccess', granted);
         break;
+      }
     }
   }
 

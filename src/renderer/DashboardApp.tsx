@@ -115,6 +115,11 @@ export default function DashboardApp() {
       setTimerState(data as TimerState);
     });
 
+    // Listen for emergency access grant/revoke
+    window.zenstate.on(IPC.EMERGENCY_ACCESS, (granted: unknown) => {
+      setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
+    });
+
     // Listen for update notifications
     window.zenstate.on('update:downloaded', (data: unknown) => {
       const info = data as { version: string };
@@ -126,6 +131,7 @@ export default function DashboardApp() {
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
       window.zenstate.removeAllListeners(IPC.PEER_LOST);
       window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
+      window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
       window.zenstate.removeAllListeners('update:downloaded');
     };
   }, [currentUser]);
