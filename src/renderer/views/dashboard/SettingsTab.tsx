@@ -138,6 +138,15 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     (window as any).zenstate.saveCategories(updated);
   }
 
+  function handleMoveCategory(index: number, direction: -1 | 1) {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= categories.length) return;
+    const updated = [...categories];
+    [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
+    setCategories(updated);
+    (window as any).zenstate.saveCategories(updated);
+  }
+
   async function handleConnectIP() {
     const input = connectIpInput.trim();
     if (!input) return;
@@ -398,20 +407,57 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
       {activeSection === 'categories' && (
         <div className="card">
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {categories.map((cat) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 12 }}>
+            {categories.map((cat, index) => (
               <div key={cat} style={{
-                padding: '6px 12px',
-                borderRadius: 8,
-                background: 'var(--zen-tertiary-bg)',
-                border: '1px solid var(--zen-divider)',
-                fontSize: 12,
-                color: 'var(--zen-secondary-text)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 8,
+                padding: '4px 8px',
+                height: 32,
+                borderRadius: 6,
+                background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
+                fontSize: 12,
               }}>
-                {cat}
+                <span style={{ width: 20, fontSize: 11, color: 'var(--zen-tertiary-text)', textAlign: 'right', flexShrink: 0 }}>
+                  {index + 1}
+                </span>
+                <span style={{ flex: 1, color: 'var(--zen-secondary-text)' }}>{cat}</span>
+                <button
+                  onClick={() => handleMoveCategory(index, -1)}
+                  disabled={index === 0}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: index === 0 ? 'default' : 'pointer',
+                    color: index === 0 ? 'var(--zen-divider)' : 'var(--zen-tertiary-text)',
+                    fontSize: 13,
+                    padding: '0 4px',
+                    lineHeight: 1,
+                    fontFamily: 'inherit',
+                  }}
+                  title="Move up"
+                >
+                  ^
+                </button>
+                <button
+                  onClick={() => handleMoveCategory(index, 1)}
+                  disabled={index === categories.length - 1}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: index === categories.length - 1 ? 'default' : 'pointer',
+                    color: index === categories.length - 1 ? 'var(--zen-divider)' : 'var(--zen-tertiary-text)',
+                    fontSize: 13,
+                    padding: '0 4px',
+                    lineHeight: 1,
+                    fontFamily: 'inherit',
+                    transform: 'rotate(180deg)',
+                  }}
+                  title="Move down"
+                >
+                  ^
+                </button>
                 <button
                   onClick={() => handleDeleteCategory(cat)}
                   style={{
@@ -420,7 +466,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
                     cursor: 'pointer',
                     color: 'var(--zen-tertiary-text)',
                     fontSize: 14,
-                    padding: 0,
+                    padding: '0 4px',
                     lineHeight: 1,
                     fontFamily: 'inherit',
                   }}

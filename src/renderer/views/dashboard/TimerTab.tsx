@@ -1,8 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
-
-const CATEGORIES = ['Development', 'Design', 'Meetings', 'Writing', 'Research', 'Planning', 'Admin', 'Other'];
 
 interface TimerState {
   elapsed: number;
@@ -44,6 +42,13 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
+      setCategories(cats || []);
+    }).catch(() => {});
+  }, []);
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
 
@@ -168,7 +173,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Category</div>
             <div className="category-picker">
-              {CATEGORIES.map((cat) => (
+              {categories.map((cat) => (
                 <button
                   key={cat}
                   className={`category-chip ${selectedCategory === cat ? 'selected' : ''}`}
@@ -290,6 +295,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
         <SessionEditModal
           session={editingSession.session}
           date={editingSession.date}
+          categories={categories}
           onSave={handleSaveEdit}
           onClose={() => setEditingSession(null)}
         />

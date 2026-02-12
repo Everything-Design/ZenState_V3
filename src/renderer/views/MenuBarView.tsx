@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Settings, Timer, LayoutDashboard } from 'lucide-react';
 import { User, AvailabilityStatus, IPC } from '../../shared/types';
 
-const CATEGORIES = ['Development', 'Design', 'Meetings', 'Writing', 'Research', 'Planning', 'Admin', 'Other'];
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
 const DURATION_OPTIONS = [
   { label: '30 min', ms: 30 * 60 * 1000 },
@@ -61,6 +60,13 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
   const [pendingRequests, setPendingRequests] = useState<Record<string, boolean>>({});
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
+      setCategories(cats || []);
+    }).catch(() => {});
+  }, []);
 
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
@@ -259,7 +265,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
           <div>
             <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category</div>
             <div className="category-picker">
-              {CATEGORIES.map((cat) => (
+              {categories.map((cat) => (
                 <button
                   key={cat}
                   className={`category-chip ${timerCategory === cat ? 'selected' : ''}`}

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 
@@ -71,6 +71,13 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
   const [showCalendar, setShowCalendar] = useState(true);
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
+      setCategories(cats || []);
+    }).catch(() => {});
+  }, []);
 
   // Filter records by period
   const filteredRecords = useMemo(() => {
@@ -588,6 +595,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
         <SessionEditModal
           session={editingSession.session}
           date={editingSession.date}
+          categories={categories}
           onSave={handleSaveEdit}
           onClose={() => setEditingSession(null)}
         />

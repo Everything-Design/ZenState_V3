@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { DailySession } from '../../shared/types';
 
-const CATEGORIES = ['Development', 'Design', 'Meetings', 'Writing', 'Research', 'Planning', 'Admin', 'Other'];
-
 interface Props {
   session: DailySession;
   date: string;
+  categories: string[];
   onSave: (sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number }) => void;
   onClose: () => void;
 }
 
-export default function SessionEditModal({ session, date, onSave, onClose }: Props) {
+export default function SessionEditModal({ session, date, categories, onSave, onClose }: Props) {
   const [taskLabel, setTaskLabel] = useState(session.taskLabel);
   const [category, setCategory] = useState(session.category || '');
   const [hours, setHours] = useState(Math.floor(session.duration / 3600));
@@ -56,7 +55,7 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
             style={{ cursor: 'pointer' }}
           >
             <option value="">None</option>
-            {CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
