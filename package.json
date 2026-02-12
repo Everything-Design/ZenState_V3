@@ -1,7 +1,7 @@
 {
   "name": "zenstate",
-  "version": "3.0.12",
-  "description": "Team presence & availability — know when your teammates are free, focused, or busy",
+  "version": "3.0.13",
+  "description": "ZenState - Everything Flow",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "npm run build:main && concurrently -k \"npm run dev:renderer\" \"npm run dev:main:watch\" \"sleep 3 && electron .\"",
