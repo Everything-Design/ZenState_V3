@@ -5,13 +5,14 @@ interface Props {
   session: DailySession;
   date: string;
   categories: string[];
-  onSave: (sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number }) => void;
+  onSave: (sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number; notes: string }) => void;
   onClose: () => void;
 }
 
 export default function SessionEditModal({ session, date, categories, onSave, onClose }: Props) {
   const [taskLabel, setTaskLabel] = useState(session.taskLabel);
   const [category, setCategory] = useState(session.category || '');
+  const [notes, setNotes] = useState(session.notes || '');
   const [hours, setHours] = useState(Math.floor(session.duration / 3600));
   const [minutes, setMinutes] = useState(Math.floor((session.duration % 3600) / 60));
 
@@ -22,6 +23,7 @@ export default function SessionEditModal({ session, date, categories, onSave, on
       taskLabel: taskLabel.trim(),
       category,
       duration,
+      notes: notes.trim(),
     });
   }
 
@@ -80,6 +82,21 @@ export default function SessionEditModal({ session, date, categories, onSave, on
               <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>m</span>
             </div>
           </div>
+        </div>
+
+        {/* Notes */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 11, color: 'var(--zen-secondary-text)', display: 'block', marginBottom: 4 }}>
+            Notes
+          </label>
+          <textarea
+            className="text-input"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={3}
+            placeholder="Add session notes (optional)"
+            style={{ resize: 'vertical' }}
+          />
         </div>
 
         {/* Started at (display only) */}

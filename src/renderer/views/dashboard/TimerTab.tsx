@@ -76,7 +76,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
     setDeleteConfirm(null);
   }
 
-  async function handleSaveEdit(sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number }) {
+  async function handleSaveEdit(sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number; notes: string }) {
     await window.zenstate.updateSession(sessionId, date, updates);
     onRefreshRecords();
     setEditingSession(null);
@@ -256,8 +256,14 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                 fontFamily: 'var(--font-mono)',
                 color: 'var(--zen-secondary-text)',
                 marginRight: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
               }}>
                 {formatDuration(session.duration)}
+                {session.notes && (
+                  <span title={session.notes} style={{ cursor: 'default', fontSize: 11 }}>📝</span>
+                )}
               </div>
               <div className="session-actions">
                 <button

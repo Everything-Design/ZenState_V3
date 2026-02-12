@@ -86,7 +86,7 @@ export class TimeTracker {
     this.persistence.saveRecords(records);
   }
 
-  updateSession(sessionId: string, dateStr: string, updates: Partial<{ taskLabel: string; category: string; duration: number }>) {
+  updateSession(sessionId: string, dateStr: string, updates: Partial<{ taskLabel: string; category: string; duration: number; notes: string }>) {
     const records = this.persistence.getRecords();
     const record = records.find((r) => r.date.startsWith(dateStr.split('T')[0]));
     if (!record) return;
@@ -96,6 +96,7 @@ export class TimeTracker {
 
     if (updates.taskLabel !== undefined) session.taskLabel = updates.taskLabel;
     if (updates.category !== undefined) session.category = updates.category;
+    if (updates.notes !== undefined) session.notes = updates.notes;
     if (updates.duration !== undefined) {
       session.duration = updates.duration;
       // Recalculate end time based on new duration
@@ -109,7 +110,7 @@ export class TimeTracker {
 
   generateCSV(monthStr: string): string {
     const records = this.getRecordsForMonth(monthStr);
-    const lines: string[] = ['Date,Day,Task,Category,Start Time,End Time,Duration (minutes),Duration (formatted)'];
+    const lines: string[] = ['Date,Day,Task,Category,Start Time,End Time,Duration (minutes),Duration (formatted),Notes'];
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -136,6 +137,7 @@ export class TimeTracker {
           escapeCSV(endFormatted),
           String(durationMin),
           escapeCSV(durationFormatted),
+          escapeCSV(session.notes || ''),
         ].join(','));
       }
     }

@@ -63,6 +63,7 @@ export interface DailySession {
   endTime?: string;
   duration: number;
   category?: string;
+  notes?: string;
 }
 
 export interface DailyRecord {
