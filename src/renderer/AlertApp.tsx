@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import AlertView from './views/AlertView';
 
 interface AlertData {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete';
   from: string;
   senderId: string;
   message?: string;
   accepted?: boolean;
+  targetDuration?: number;
 }
 
 export default function AlertApp() {
@@ -33,6 +34,7 @@ export default function AlertApp() {
       senderId={alertData.senderId}
       message={alertData.message}
       accepted={alertData.accepted}
+      targetDuration={alertData.targetDuration}
       onRespond={(accepted, message) => {
         window.zenstate.respondMeetingRequest(alertData.senderId, accepted, message);
         window.close();

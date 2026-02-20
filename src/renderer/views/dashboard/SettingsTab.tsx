@@ -32,6 +32,8 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   // Categories
   const [categories, setCategories] = useState<string[]>([]);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Network
   const [localInfo, setLocalInfo] = useState<{ addresses: string[]; port: number }>({ addresses: [], port: 0 });
@@ -409,55 +411,48 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 12 }}>
             {categories.map((cat, index) => (
-              <div key={cat} style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '4px 8px',
-                height: 32,
-                borderRadius: 6,
-                background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
-                fontSize: 12,
-              }}>
+              <div
+                key={cat}
+                draggable
+                onDragStart={() => setDragIndex(index)}
+                onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+                onDragLeave={() => { if (dragOverIndex === index) setDragOverIndex(null); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIndex !== null && dragIndex !== index) {
+                    const updated = [...categories];
+                    const [moved] = updated.splice(dragIndex, 1);
+                    updated.splice(index, 0, moved);
+                    setCategories(updated);
+                    (window as any).zenstate.saveCategories(updated);
+                  }
+                  setDragIndex(null);
+                  setDragOverIndex(null);
+                }}
+                onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '4px 8px',
+                  height: 32,
+                  borderRadius: 6,
+                  background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
+                  fontSize: 12,
+                  opacity: dragIndex === index ? 0.4 : 1,
+                  borderTop: dragOverIndex === index && dragIndex !== null && dragIndex > index ? '2px solid var(--zen-primary)' : '2px solid transparent',
+                  borderBottom: dragOverIndex === index && dragIndex !== null && dragIndex < index ? '2px solid var(--zen-primary)' : '2px solid transparent',
+                  transition: 'opacity 0.15s ease',
+                  cursor: 'grab',
+                }}
+              >
+                <span style={{ fontSize: 14, color: 'var(--zen-tertiary-text)', cursor: 'grab', flexShrink: 0, userSelect: 'none' }}>
+                  ⠿
+                </span>
                 <span style={{ width: 20, fontSize: 11, color: 'var(--zen-tertiary-text)', textAlign: 'right', flexShrink: 0 }}>
                   {index + 1}
                 </span>
                 <span style={{ flex: 1, color: 'var(--zen-secondary-text)' }}>{cat}</span>
-                <button
-                  onClick={() => handleMoveCategory(index, -1)}
-                  disabled={index === 0}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: index === 0 ? 'default' : 'pointer',
-                    color: index === 0 ? 'var(--zen-divider)' : 'var(--zen-tertiary-text)',
-                    fontSize: 13,
-                    padding: '0 4px',
-                    lineHeight: 1,
-                    fontFamily: 'inherit',
-                  }}
-                  title="Move up"
-                >
-                  ^
-                </button>
-                <button
-                  onClick={() => handleMoveCategory(index, 1)}
-                  disabled={index === categories.length - 1}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: index === categories.length - 1 ? 'default' : 'pointer',
-                    color: index === categories.length - 1 ? 'var(--zen-divider)' : 'var(--zen-tertiary-text)',
-                    fontSize: 13,
-                    padding: '0 4px',
-                    lineHeight: 1,
-                    fontFamily: 'inherit',
-                    transform: 'rotate(180deg)',
-                  }}
-                  title="Move down"
-                >
-                  ^
-                </button>
                 <button
                   onClick={() => handleDeleteCategory(cat)}
                   style={{
@@ -499,7 +494,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           </div>
 
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
-            Categories are used to organize your focus sessions and time tracking.
+            Drag ⠿ to reorder. Categories organize your focus sessions and time tracking.
           </div>
         </div>
       )}

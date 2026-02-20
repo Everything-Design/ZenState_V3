@@ -41,6 +41,7 @@ let timerIsPaused = false;
 let timerIsRunning = false;
 let timerTaskLabel = '';
 let timerCategory: string | undefined;
+let timerTargetDuration: number | undefined;
 
 function isDev(): boolean {
   return !app.isPackaged;
@@ -245,11 +246,28 @@ function showEmergencyAlert(data: { from: string; senderId: string; message?: st
   });
 }
 
+function showTimerCompleteAlert(taskLabel: string, targetDuration: number, statusChanged: boolean) {
+  const alertWin = createAlertWindow(getRendererURL('alert.html'), {
+    width: 360,
+    height: 280,
+  });
+  alertWin.webContents.once('did-finish-load', () => {
+    alertWin.webContents.send('alert-data', {
+      type: 'timerComplete',
+      from: taskLabel,
+      senderId: '',
+      message: statusChanged ? 'Status changed to Occupied' : undefined,
+      targetDuration,
+    });
+  });
+}
+
 // ── Timer Logic ────────────────────────────────────────────────
 
-function startTimer(taskLabel: string, category?: string) {
+function startTimer(taskLabel: string, category?: string, targetDuration?: number) {
   timerTaskLabel = taskLabel;
   timerCategory = category;
+  timerTargetDuration = targetDuration;
   timerStartTime = new Date();
   timerAccumulatedTime = 0;
   timerIsPaused = false;
@@ -258,16 +276,46 @@ function startTimer(taskLabel: string, category?: string) {
   timerInterval = setInterval(() => {
     if (timerIsRunning && !timerIsPaused && timerStartTime) {
       const elapsed = timerAccumulatedTime + (Date.now() - timerStartTime.getTime()) / 1000;
+      const remaining = timerTargetDuration ? Math.max(0, timerTargetDuration - elapsed) : undefined;
+
       broadcastToWindows(IPC.TIMER_UPDATE, {
         elapsed,
         isRunning: true,
         isPaused: false,
         taskLabel: timerTaskLabel,
         category: timerCategory,
+        targetDuration: timerTargetDuration,
+        remaining,
       });
       updateTrayIcon(persistence.getUser()!, elapsed, true);
+
+      // Countdown complete
+      if (timerTargetDuration && remaining !== undefined && remaining <= 0) {
+        handleCountdownComplete();
+      }
     }
   }, 1000);
+}
+
+function handleCountdownComplete() {
+  const user = persistence.getUser();
+  let statusChanged = false;
+
+  if (user && user.status === AvailabilityStatus.Focused) {
+    user.status = AvailabilityStatus.Occupied;
+    persistence.saveUser(user);
+    networking?.updateUser(user);
+    updateTrayIcon(user, 0, false);
+    broadcastToWindows(IPC.PEER_UPDATED, user);
+    statusChanged = true;
+  }
+
+  const taskLabel = timerTaskLabel;
+  const targetDuration = timerTargetDuration;
+  stopTimer();
+
+  broadcastToWindows(IPC.TIMER_COMPLETE, { taskLabel, targetDuration, statusChanged });
+  showTimerCompleteAlert(taskLabel, targetDuration || 0, statusChanged);
 }
 
 function pauseTimer() {
@@ -275,12 +323,15 @@ function pauseTimer() {
     timerAccumulatedTime += (Date.now() - timerStartTime.getTime()) / 1000;
     timerStartTime = null;
     timerIsPaused = true;
+    const remaining = timerTargetDuration ? Math.max(0, timerTargetDuration - timerAccumulatedTime) : undefined;
     broadcastToWindows(IPC.TIMER_UPDATE, {
       elapsed: timerAccumulatedTime,
       isRunning: true,
       isPaused: true,
       taskLabel: timerTaskLabel,
       category: timerCategory,
+      targetDuration: timerTargetDuration,
+      remaining,
     });
   }
 }
@@ -318,6 +369,7 @@ function stopTimer() {
   timerIsRunning = false;
   timerTaskLabel = '';
   timerCategory = undefined;
+  timerTargetDuration = undefined;
 
   broadcastToWindows(IPC.TIMER_UPDATE, {
     elapsed: 0,
@@ -385,8 +437,8 @@ function setupIPC() {
   });
 
   // Timer
-  ipcMain.on(IPC.START_TIMER, (_e, data: { taskLabel: string; category?: string }) => {
-    startTimer(data.taskLabel, data.category);
+  ipcMain.on(IPC.START_TIMER, (_e, data: { taskLabel: string; category?: string; targetDuration?: number }) => {
+    startTimer(data.taskLabel, data.category, data.targetDuration);
   });
   ipcMain.on(IPC.STOP_TIMER, () => stopTimer());
   ipcMain.on(IPC.PAUSE_TIMER, () => pauseTimer());

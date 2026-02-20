@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
 
 interface Props {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete';
   from: string;
   senderId: string;
   message?: string;
   accepted?: boolean;
+  targetDuration?: number;
   onRespond: (accepted: boolean, message?: string) => void;
   onDismiss: () => void;
 }
 
 const QUICK_REPLIES = ['Give me 5 mins', 'Free after lunch', "Let's do tomorrow"];
 
-export default function AlertView({ type, from, senderId, message, accepted, onRespond, onDismiss }: Props) {
+function formatAlertDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
+}
+
+export default function AlertView({ type, from, senderId, message, accepted, targetDuration, onRespond, onDismiss }: Props) {
   const [replyText, setReplyText] = useState('');
   const [selectedQuickReply, setSelectedQuickReply] = useState<string | null>(null);
   const isEmergency = type === 'emergencyRequest';
@@ -35,6 +44,56 @@ export default function AlertView({ type, from, senderId, message, accepted, onR
       setSelectedQuickReply(reply);
       setReplyText(reply);
     }
+  }
+
+  // Timer complete view
+  if (type === 'timerComplete') {
+    return (
+      <div className="alert-panel fade-in" style={{ width: 320 }}>
+        <div style={{ textAlign: 'center', fontSize: 36, marginBottom: 12 }}>⏰</div>
+        <div className="alert-title" style={{ textAlign: 'center', color: 'var(--zen-primary)' }}>
+          Time's Up!
+        </div>
+        <div style={{
+          textAlign: 'center',
+          fontSize: 13,
+          color: 'var(--zen-secondary-text)',
+          marginBottom: 8,
+        }}>
+          <strong>{from}</strong>
+        </div>
+        {targetDuration && (
+          <div style={{
+            textAlign: 'center',
+            fontSize: 12,
+            color: 'var(--zen-tertiary-text)',
+            marginBottom: message ? 12 : 20,
+          }}>
+            {formatAlertDuration(targetDuration)} completed
+          </div>
+        )}
+        {message && (
+          <div style={{
+            padding: '10px 12px',
+            background: 'rgba(255, 149, 0, 0.1)',
+            borderRadius: 8,
+            fontSize: 12,
+            color: 'var(--status-occupied)',
+            textAlign: 'center',
+            marginBottom: 20,
+          }}>
+            {message}
+          </div>
+        )}
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+          onClick={onDismiss}
+        >
+          OK
+        </button>
+      </div>
+    );
   }
 
   // Meeting response view — shown when someone accepts/declines your request

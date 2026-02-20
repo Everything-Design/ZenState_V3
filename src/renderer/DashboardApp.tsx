@@ -16,7 +16,7 @@ declare global {
       respondMeetingRequest: (userId: string, accepted: boolean, message?: string) => void;
       sendEmergencyRequest: (userId: string, message?: string) => void;
       grantEmergencyAccess: (userId: string, granted: boolean) => void;
-      startTimer: (taskLabel: string, category?: string) => void;
+      startTimer: (taskLabel: string, category?: string, targetDuration?: number) => void;
       stopTimer: () => void;
       pauseTimer: () => void;
       resumeTimer: () => void;
@@ -47,6 +47,8 @@ interface TimerState {
   isPaused: boolean;
   taskLabel: string;
   category?: string;
+  targetDuration?: number;
+  remaining?: number;
 }
 
 export default function DashboardApp() {

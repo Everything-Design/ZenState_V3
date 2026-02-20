@@ -8,6 +8,8 @@ interface TimerState {
   isPaused: boolean;
   taskLabel: string;
   category?: string;
+  targetDuration?: number;
+  remaining?: number;
 }
 
 interface Props {
@@ -36,10 +38,23 @@ function getTodayDateStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const DURATION_PRESETS = [
+  { label: '15m', seconds: 15 * 60 },
+  { label: '25m', seconds: 25 * 60 },
+  { label: '30m', seconds: 30 * 60 },
+  { label: '45m', seconds: 45 * 60 },
+  { label: '1h', seconds: 60 * 60 },
+  { label: '1.5h', seconds: 90 * 60 },
+  { label: '2h', seconds: 120 * 60 },
+];
+
 export default function TimerTab({ timerState, records, onRefreshRecords }: Props) {
   const [showInput, setShowInput] = useState(false);
   const [taskInput, setTaskInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('stopwatch');
+  const [selectedDuration, setSelectedDuration] = useState<number>(25 * 60);
+  const [customMinutes, setCustomMinutes] = useState('');
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
@@ -51,6 +66,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   }, []);
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
+  const isCountdown = !!timerState.targetDuration;
 
   const todayRecord = useMemo(() => {
     const today = getTodayDateStr();
@@ -63,9 +79,11 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
 
   function handleStartTimer() {
     if (!taskInput.trim()) return;
-    window.zenstate.startTimer(taskInput.trim(), selectedCategory || undefined);
+    const target = timerMode === 'countdown' ? selectedDuration : undefined;
+    window.zenstate.startTimer(taskInput.trim(), selectedCategory || undefined, target);
     setTaskInput('');
     setSelectedCategory('');
+    setCustomMinutes('');
     setShowInput(false);
   }
 
@@ -106,8 +124,13 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                 animation: timerState.isPaused ? 'none' : 'pulse 2s ease-in-out infinite',
               }} />
               <span style={{ fontSize: 13, fontWeight: 600 }}>
-                {timerState.isPaused ? 'Paused' : 'Recording'}
+                {timerState.isPaused ? 'Paused' : isCountdown ? 'Countdown' : 'Recording'}
               </span>
+              {isCountdown && (
+                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
+                  {formatDuration(timerState.targetDuration!)} session
+                </span>
+              )}
             </div>
 
             <div style={{ fontSize: 13, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>
@@ -134,8 +157,27 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
               color: timerState.isPaused ? 'var(--status-occupied)' : 'var(--zen-primary)',
               margin: '12px 0',
             }}>
-              {formatTime(timerState.elapsed)}
+              {isCountdown ? formatTime(timerState.remaining ?? 0) : formatTime(timerState.elapsed)}
             </div>
+
+            {/* Progress bar for countdown */}
+            {isCountdown && timerState.targetDuration && (
+              <div style={{
+                height: 4,
+                borderRadius: 2,
+                background: 'var(--zen-tertiary-bg)',
+                marginBottom: 12,
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%',
+                  borderRadius: 2,
+                  background: timerState.isPaused ? 'var(--status-occupied)' : 'var(--zen-primary)',
+                  width: `${Math.min(100, (timerState.elapsed / timerState.targetDuration) * 100)}%`,
+                  transition: 'width 1s linear',
+                }} />
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: 8 }}>
               {timerState.isPaused ? (
@@ -170,6 +212,83 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
             }}
           />
 
+          {/* Mode Toggle */}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Mode</div>
+            <div style={{ display: 'flex', gap: 4, background: 'var(--zen-tertiary-bg)', borderRadius: 8, padding: 2 }}>
+              <button
+                style={{
+                  flex: 1,
+                  padding: '6px 0',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  background: timerMode === 'stopwatch' ? 'var(--zen-primary)' : 'transparent',
+                  color: timerMode === 'stopwatch' ? 'white' : 'var(--zen-secondary-text)',
+                  transition: 'all 0.15s ease',
+                }}
+                onClick={() => setTimerMode('stopwatch')}
+              >
+                ⏱ Stopwatch
+              </button>
+              <button
+                style={{
+                  flex: 1,
+                  padding: '6px 0',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  borderRadius: 6,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  background: timerMode === 'countdown' ? 'var(--zen-primary)' : 'transparent',
+                  color: timerMode === 'countdown' ? 'white' : 'var(--zen-secondary-text)',
+                  transition: 'all 0.15s ease',
+                }}
+                onClick={() => setTimerMode('countdown')}
+              >
+                ⏳ Countdown
+              </button>
+            </div>
+          </div>
+
+          {/* Duration Picker (countdown mode) */}
+          {timerMode === 'countdown' && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Duration</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {DURATION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    className={`category-chip ${selectedDuration === preset.seconds ? 'selected' : ''}`}
+                    onClick={() => { setSelectedDuration(preset.seconds); setCustomMinutes(''); }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                <input
+                  className="text-input"
+                  placeholder="Custom minutes..."
+                  type="number"
+                  min="1"
+                  value={customMinutes}
+                  onChange={(e) => {
+                    setCustomMinutes(e.target.value);
+                    const mins = parseInt(e.target.value);
+                    if (mins > 0) setSelectedDuration(mins * 60);
+                  }}
+                  style={{ flex: 1, fontSize: 12 }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>min</span>
+              </div>
+            </div>
+          )}
+
           <div style={{ marginTop: 12 }}>
             <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Category</div>
             <div className="category-picker">
@@ -186,12 +305,12 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
           </div>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-            <button className="btn btn-secondary" onClick={() => { setShowInput(false); setTaskInput(''); setSelectedCategory(''); }}>
+            <button className="btn btn-secondary" onClick={() => { setShowInput(false); setTaskInput(''); setSelectedCategory(''); setCustomMinutes(''); }}>
               Cancel
             </button>
             <div className="spacer" />
             <button className="btn btn-primary" disabled={!taskInput.trim()} onClick={handleStartTimer}>
-              ● Start Recording
+              {timerMode === 'countdown' ? `⏳ Start ${formatDuration(selectedDuration)}` : '● Start Recording'}
             </button>
           </div>
         </div>

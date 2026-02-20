@@ -21,6 +21,8 @@ export default function App() {
     isPaused: false,
     taskLabel: '',
     category: undefined as string | undefined,
+    targetDuration: undefined as number | undefined,
+    remaining: undefined as number | undefined,
   });
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
 

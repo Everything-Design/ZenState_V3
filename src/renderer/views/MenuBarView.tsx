@@ -17,6 +17,8 @@ interface TimerState {
   isPaused: boolean;
   taskLabel: string;
   category?: string;
+  targetDuration?: number;
+  remaining?: number;
 }
 
 interface Props {
@@ -34,6 +36,14 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0 && m > 0) return `${h}h ${m}m`;
+  if (h > 0) return `${h}h`;
+  return `${m}m`;
 }
 
 function getStatusColor(status: AvailabilityStatus): string {
@@ -56,6 +66,9 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [showTimerInput, setShowTimerInput] = useState(false);
   const [timerTaskInput, setTimerTaskInput] = useState('');
   const [timerCategory, setTimerCategory] = useState('');
+  const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('stopwatch');
+  const [selectedDuration, setSelectedDuration] = useState(25 * 60);
+  const [customMinutes, setCustomMinutes] = useState('');
   const [showStatusMessage, setShowStatusMessage] = useState(false);
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
@@ -114,11 +127,20 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
 
+  const MENU_DURATION_PRESETS = [
+    { label: '15m', seconds: 15 * 60 },
+    { label: '25m', seconds: 25 * 60 },
+    { label: '45m', seconds: 45 * 60 },
+    { label: '1h', seconds: 60 * 60 },
+  ];
+
   function handleStartTimer() {
     if (!timerTaskInput.trim()) return;
-    window.zenstate.startTimer(timerTaskInput.trim(), timerCategory || undefined);
+    const target = timerMode === 'countdown' ? selectedDuration : undefined;
+    window.zenstate.startTimer(timerTaskInput.trim(), timerCategory || undefined, target);
     setTimerTaskInput('');
     setTimerCategory('');
+    setCustomMinutes('');
     setShowTimerInput(false);
   }
 
@@ -246,7 +268,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   if (showTimerInput && !isTimerActive) {
     return (
       <div className="popover fade-in">
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div className="hstack" style={{ gap: 8 }}>
             <button className="footer-btn" onClick={() => setShowTimerInput(false)}>
               ‹ Back
@@ -264,6 +286,65 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
               if (e.key === 'Enter' && timerTaskInput.trim()) handleStartTimer();
             }}
           />
+
+          {/* Mode Toggle */}
+          <div style={{ display: 'flex', gap: 4, background: 'var(--zen-tertiary-bg)', borderRadius: 6, padding: 2 }}>
+            <button
+              style={{
+                flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 600, borderRadius: 4,
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                background: timerMode === 'stopwatch' ? 'var(--zen-primary)' : 'transparent',
+                color: timerMode === 'stopwatch' ? 'white' : 'var(--zen-secondary-text)',
+              }}
+              onClick={() => setTimerMode('stopwatch')}
+            >
+              ⏱ Stopwatch
+            </button>
+            <button
+              style={{
+                flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 600, borderRadius: 4,
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                background: timerMode === 'countdown' ? 'var(--zen-primary)' : 'transparent',
+                color: timerMode === 'countdown' ? 'white' : 'var(--zen-secondary-text)',
+              }}
+              onClick={() => setTimerMode('countdown')}
+            >
+              ⏳ Countdown
+            </button>
+          </div>
+
+          {/* Duration Picker (countdown mode) */}
+          {timerMode === 'countdown' && (
+            <div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {MENU_DURATION_PRESETS.map((preset) => (
+                  <button
+                    key={preset.label}
+                    className={`category-chip ${selectedDuration === preset.seconds ? 'selected' : ''}`}
+                    onClick={() => { setSelectedDuration(preset.seconds); setCustomMinutes(''); }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
+                <input
+                  className="text-input"
+                  placeholder="Custom..."
+                  type="number"
+                  min="1"
+                  value={customMinutes}
+                  onChange={(e) => {
+                    setCustomMinutes(e.target.value);
+                    const mins = parseInt(e.target.value);
+                    if (mins > 0) setSelectedDuration(mins * 60);
+                  }}
+                  style={{ flex: 1, fontSize: 11 }}
+                />
+                <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>min</span>
+              </div>
+            </div>
+          )}
 
           {/* Category Picker */}
           <div>
@@ -284,7 +365,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
           <div className="hstack" style={{ gap: 8 }}>
             <button
               className="btn btn-secondary"
-              onClick={() => { setShowTimerInput(false); setTimerTaskInput(''); setTimerCategory(''); }}
+              onClick={() => { setShowTimerInput(false); setTimerTaskInput(''); setTimerCategory(''); setCustomMinutes(''); }}
             >
               Cancel
             </button>
@@ -294,7 +375,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
               disabled={!timerTaskInput.trim()}
               onClick={handleStartTimer}
             >
-              Start
+              {timerMode === 'countdown' ? `⏳ ${formatDuration(selectedDuration)}` : 'Start'}
             </button>
           </div>
         </div>
@@ -366,10 +447,10 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
         <div className="timer-display" style={{ margin: '6px 16px', padding: '6px 12px' }}>
           <div className="hstack" style={{ gap: 8, alignItems: 'center' }}>
             <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              ⏱ {timerState.taskLabel}
+              {timerState.targetDuration ? '⏳' : '⏱'} {timerState.taskLabel}
             </span>
             <div className={`timer-time ${timerState.isPaused ? 'paused' : ''}`} style={{ fontSize: 14, flexShrink: 0 }}>
-              {formatTime(timerState.elapsed)}
+              {timerState.targetDuration ? formatTime(timerState.remaining ?? 0) : formatTime(timerState.elapsed)}
             </div>
             {timerState.isPaused ? (
               <button className="btn btn-primary" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => window.zenstate.resumeTimer()}>
@@ -384,6 +465,17 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
               ■ Stop
             </button>
           </div>
+          {/* Progress bar for countdown in menu bar */}
+          {timerState.targetDuration && (
+            <div style={{ height: 2, borderRadius: 1, background: 'var(--zen-tertiary-bg)', marginTop: 6, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 1,
+                background: timerState.isPaused ? 'var(--status-occupied)' : 'var(--zen-primary)',
+                width: `${Math.min(100, (timerState.elapsed / timerState.targetDuration) * 100)}%`,
+                transition: 'width 1s linear',
+              }} />
+            </div>
+          )}
         </div>
       )}
 

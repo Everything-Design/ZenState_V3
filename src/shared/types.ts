@@ -124,6 +124,7 @@ export const IPC = {
   PAUSE_TIMER: 'timer:pause',
   RESUME_TIMER: 'timer:resume',
   TIMER_UPDATE: 'timer:update',
+  TIMER_COMPLETE: 'timer:complete',
 
   // Data (renderer → main)
   GET_USER: 'data:get-user',
