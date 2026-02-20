@@ -60,6 +60,8 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
   const [pendingRequests, setPendingRequests] = useState<Record<string, boolean>>({});
+  const [messagePopup, setMessagePopup] = useState<string | null>(null);
+  const [messageText, setMessageText] = useState('');
   const [categories, setCategories] = useState<string[]>([]);
 
   useEffect(() => {
@@ -145,9 +147,11 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
     setShowStatusMessage(false);
   }
 
-  function handleSendRequest(userId: string) {
-    window.zenstate.sendMeetingRequest(userId);
+  function handleSendRequest(userId: string, message?: string) {
+    window.zenstate.sendMeetingRequest(userId, message);
     setPendingRequests((prev) => ({ ...prev, [userId]: true }));
+    setMessagePopup(null);
+    setMessageText('');
   }
 
   function handleSendEmergencyRequest(userId: string) {
@@ -427,56 +431,109 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
           </div>
         ) : (
           filteredPeers.map((peer) => (
-            <div key={peer.id} className="team-member-row">
-              <div className="member-avatar" style={{ background: peer.avatarColor || '#8E8E93' }}>
-                {peer.avatarImageData ? (
-                  <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                ) : peer.avatarEmoji ? (
-                  peer.avatarEmoji
-                ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
-                )}
-              </div>
-              <div className="member-info">
-                <div className="member-name">{peer.name}</div>
-                {peer.activeStatusMessage ? (
-                  <div className="member-message">
-                    💬 {peer.activeStatusMessage}
-                  </div>
-                ) : (
-                  <div className="member-status-text" style={{ color: getStatusColor(peer.status) }}>
-                    {peer.status}
-                  </div>
-                )}
-              </div>
-              {pendingRequests[peer.id] ? (
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
-                  onClick={() => handleCancelRequest(peer.id)}
-                >
-                  Cancel
-                </button>
-              ) : peer.status === AvailabilityStatus.Focused ? (
-                (currentUser.canSendEmergency || currentUser.isAdmin) ? (
+            <div key={peer.id}>
+              <div className="team-member-row">
+                <div className="member-avatar" style={{ background: peer.avatarColor || '#8E8E93' }}>
+                  {peer.avatarImageData ? (
+                    <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                  ) : peer.avatarEmoji ? (
+                    peer.avatarEmoji
+                  ) : (
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
+                  )}
+                </div>
+                <div className="member-info">
+                  <div className="member-name">{peer.name}</div>
+                  {peer.activeStatusMessage ? (
+                    <div className="member-message">
+                      💬 {peer.activeStatusMessage}
+                    </div>
+                  ) : (
+                    <div className="member-status-text" style={{ color: getStatusColor(peer.status) }}>
+                      {peer.status}
+                    </div>
+                  )}
+                </div>
+                {pendingRequests[peer.id] ? (
                   <button
-                    className="btn btn-danger"
+                    className="btn btn-secondary"
                     style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
-                    onClick={() => handleSendEmergencyRequest(peer.id)}
+                    onClick={() => handleCancelRequest(peer.id)}
                   >
-                    🚨 Urgent
+                    Cancel
                   </button>
-                ) : null
-              ) : (
-                <button
-                  className="btn btn-primary"
-                  style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
-                  onClick={() => handleSendRequest(peer.id)}
-                >
-                  Request
-                </button>
+                ) : peer.status === AvailabilityStatus.Focused ? (
+                  (currentUser.canSendEmergency || currentUser.isAdmin) ? (
+                    <button
+                      className="btn btn-danger"
+                      style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
+                      onClick={() => handleSendEmergencyRequest(peer.id)}
+                    >
+                      🚨 Urgent
+                    </button>
+                  ) : null
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
+                    onClick={() => {
+                      setMessagePopup(messagePopup === peer.id ? null : peer.id);
+                      setMessageText('');
+                    }}
+                  >
+                    Request
+                  </button>
+                )}
+                <span className={`status-dot ${peer.status}`} />
+              </div>
+              {/* Meeting request message popup */}
+              {messagePopup === peer.id && (
+                <div style={{
+                  margin: '4px 12px 8px',
+                  padding: 10,
+                  background: 'var(--zen-tertiary-bg)',
+                  borderRadius: 8,
+                  border: '1px solid var(--zen-divider)',
+                }}>
+                  <input
+                    className="text-input"
+                    placeholder="Add a message (optional)..."
+                    value={messageText}
+                    onChange={(e) => setMessageText(e.target.value)}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        handleSendRequest(peer.id, messageText || undefined);
+                      }
+                      if (e.key === 'Escape') {
+                        setMessagePopup(null);
+                        setMessageText('');
+                      }
+                    }}
+                    style={{ fontSize: 11, marginBottom: 6 }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 9, padding: '2px 8px' }}
+                      onClick={() => {
+                        handleSendRequest(peer.id);
+                      }}
+                    >
+                      Skip
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: 9, padding: '2px 8px' }}
+                      onClick={() => {
+                        handleSendRequest(peer.id, messageText || undefined);
+                      }}
+                    >
+                      Send
+                    </button>
+                  </div>
+                </div>
               )}
-              <span className={`status-dot ${peer.status}`} />
             </div>
           ))
         )}
