@@ -1,5 +1,5 @@
 import Store from 'electron-store';
-import { User, DailyRecord, FocusSchedule, FocusTemplate } from '../../shared/types';
+import { User, DailyRecord, FocusSchedule, FocusTemplate, AppSettings } from '../../shared/types';
 
 const store = new Store({
   name: 'zenstate-data',
@@ -18,6 +18,13 @@ const store = new Store({
       { id: '6', name: 'Quick Task', icon: 'zap', defaultDuration: 900, color: '#AF52DE' },
     ] as FocusTemplate[],
     emergencyGrantedIds: [] as string[],
+    appSettings: {
+      dailyFocusGoalSeconds: 6 * 3600, // 6 hours
+      breakReminderEnabled: false,
+      breakReminderIntervalSeconds: 90 * 60, // 90 minutes
+      idleDetectionEnabled: false,
+      idleThresholdSeconds: 5 * 60, // 5 minutes
+    } as AppSettings,
   },
 });
 
@@ -68,6 +75,18 @@ export class PersistenceService {
 
   getTemplates(): FocusTemplate[] {
     return store.get('focusTemplates') as FocusTemplate[];
+  }
+
+  saveTemplates(templates: FocusTemplate[]): void {
+    store.set('focusTemplates', templates);
+  }
+
+  getSettings(): AppSettings {
+    return store.get('appSettings') as AppSettings;
+  }
+
+  saveSettings(settings: AppSettings): void {
+    store.set('appSettings', settings);
   }
 
   getEmergencyGrantedIds(): string[] {

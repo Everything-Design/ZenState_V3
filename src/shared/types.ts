@@ -45,6 +45,7 @@ export enum MessageType {
   UserInfo = 'userInfo',
   EmergencyMeetingRequest = 'emergencyMeetingRequest',
   EmergencyAccessGrant = 'emergencyAccessGrant',
+  AdminNotification = 'adminNotification',
 }
 
 export interface PeerMessage {
@@ -90,6 +91,15 @@ export interface FocusTemplate {
   icon: string;
   defaultDuration: number;
   color: string;
+  category?: string;
+}
+
+export interface AppSettings {
+  dailyFocusGoalSeconds: number;
+  breakReminderEnabled: boolean;
+  breakReminderIntervalSeconds: number;
+  idleDetectionEnabled: boolean;
+  idleThresholdSeconds: number;
 }
 
 // IPC channel names for main ↔ renderer communication
@@ -134,6 +144,25 @@ export const IPC = {
   DELETE_SESSION: 'data:delete-session',
   UPDATE_SESSION: 'data:update-session',
   EXPORT_CSV: 'data:export-csv',
+
+  // Settings & Templates (renderer → main)
+  GET_SETTINGS: 'data:get-settings',
+  SAVE_SETTINGS: 'data:save-settings',
+  GET_TEMPLATES: 'data:get-templates',
+  SAVE_TEMPLATES: 'data:save-templates',
+
+  // Break/Idle/Revert notifications (main → renderer)
+  BREAK_REMINDER: 'timer:break-reminder',
+  TIMER_AUTO_PAUSED: 'timer:auto-paused',
+  STATUS_REVERT_TICK: 'status:revert-tick',
+
+  // Status revert (renderer → main)
+  SET_STATUS_REVERT: 'status:set-revert',
+  CANCEL_STATUS_REVERT: 'status:cancel-revert',
+
+  // Admin notifications (bidirectional)
+  SEND_ADMIN_NOTIFICATION: 'admin:send-notification',
+  ADMIN_NOTIFICATION_RECEIVED: 'admin:notification-received',
 
   // Tray updates (renderer → main)
   UPDATE_TRAY: 'tray:update',

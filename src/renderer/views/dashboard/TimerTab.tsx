@@ -1,7 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { DailyRecord, DailySession } from '../../../shared/types';
+import { DailyRecord, DailySession, FocusTemplate, AppSettings } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
+
+const TEMPLATE_ICONS: Record<string, string> = {
+  brain: '🧠',
+  code: '💻',
+  pencil: '✏️',
+  palette: '🎨',
+  calendar: '📅',
+  zap: '⚡',
+};
 
 interface TimerState {
   elapsed: number;
@@ -60,6 +69,8 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
+  const [templates, setTemplates] = useState<FocusTemplate[]>([]);
+  const [dailyGoalSeconds, setDailyGoalSeconds] = useState(0);
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
@@ -67,6 +78,12 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
     }).catch(() => {});
     (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
       setCategoryColors(colors || {});
+    }).catch(() => {});
+    (window as any).zenstate.getTemplates?.().then((t: FocusTemplate[]) => {
+      setTemplates(t || []);
+    }).catch(() => {});
+    (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
+      setDailyGoalSeconds(s?.dailyFocusGoalSeconds || 0);
     }).catch(() => {});
   }, []);
 
@@ -81,6 +98,10 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const todaySessions = useMemo(() => {
     return todayRecord?.sessions ? [...todayRecord.sessions].reverse() : [];
   }, [todayRecord]);
+
+  const todayTotal = (todayRecord?.totalFocusTime || 0) + (timerState.isRunning || timerState.isPaused ? timerState.elapsed : 0);
+  const dailyProgress = dailyGoalSeconds > 0 ? Math.min(1, todayTotal / dailyGoalSeconds) : 0;
+  const goalComplete = dailyGoalSeconds > 0 && todayTotal >= dailyGoalSeconds;
 
   function handleStartTimer() {
     if (!taskInput.trim()) return;
@@ -325,19 +346,71 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
         </div>
       )}
 
-      {/* Start Timer Button (idle) */}
+      {/* Focus Templates (idle state) */}
       {!isTimerActive && !showInput && (
-        <div
-          className="card"
-          style={{ textAlign: 'center', padding: 32, cursor: 'pointer', transition: 'transform 0.15s ease' }}
-          onClick={() => setShowInput(true)}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.01)')}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-        >
-          <div style={{ fontSize: 32, marginBottom: 8 }}>⏱</div>
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Start Recording Time</div>
-          <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>
-            Track what you're working on and how long it takes.
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+            {templates.map((t) => (
+              <div
+                key={t.id}
+                className="card"
+                style={{
+                  textAlign: 'center',
+                  padding: '16px 8px',
+                  cursor: 'pointer',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                  borderLeft: `3px solid ${t.color}`,
+                }}
+                onClick={() => {
+                  window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = ''; }}
+              >
+                <div style={{ fontSize: 24, marginBottom: 6 }}>{TEMPLATE_ICONS[t.icon] || '⏱'}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2, lineHeight: 1.2 }}>{t.name}</div>
+                <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</div>
+              </div>
+            ))}
+          </div>
+          <button
+            className="btn btn-secondary"
+            style={{ width: '100%', fontSize: 12, marginBottom: 12 }}
+            onClick={() => setShowInput(true)}
+          >
+            + Custom Recording
+          </button>
+        </>
+      )}
+
+      {/* Daily Focus Goal Progress */}
+      {dailyGoalSeconds > 0 && (
+        <div className="card" style={{ marginBottom: 12, padding: '12px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>
+              {goalComplete ? '🎉' : '🎯'} Daily Goal
+            </span>
+            <span style={{ fontSize: 11, color: goalComplete ? 'var(--status-available)' : 'var(--zen-secondary-text)' }}>
+              {formatDuration(todayTotal)} / {formatDuration(dailyGoalSeconds)}
+              {goalComplete && ' — Complete!'}
+            </span>
+          </div>
+          <div style={{
+            height: 6,
+            borderRadius: 3,
+            background: 'var(--zen-tertiary-bg)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%',
+              borderRadius: 3,
+              background: goalComplete ? 'var(--status-available)' : 'var(--zen-primary)',
+              width: `${dailyProgress * 100}%`,
+              transition: 'width 0.5s ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 4, textAlign: 'right' }}>
+            {Math.round(dailyProgress * 100)}%
           </div>
         </div>
       )}

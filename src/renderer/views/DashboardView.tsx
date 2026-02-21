@@ -19,11 +19,20 @@ interface Props {
   peers: User[];
   timerState: TimerState;
   records: DailyRecord[];
+  statusRevertRemaining?: number;
   onRefreshRecords: () => void;
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onSignOut: () => void;
 }
+
+const REVERT_OPTIONS = [
+  { label: '15m', seconds: 15 * 60 },
+  { label: '30m', seconds: 30 * 60 },
+  { label: '1h', seconds: 60 * 60 },
+  { label: '2h', seconds: 2 * 60 * 60 },
+  { label: 'None', seconds: 0 },
+];
 
 function getStatusColor(status: AvailabilityStatus): string {
   switch (status) {
@@ -45,10 +54,18 @@ function getStatusLabel(status: AvailabilityStatus): string {
 
 type Tab = 'team' | 'timer' | 'timesheet' | 'settings';
 
-export default function DashboardView({ currentUser, peers, timerState, records, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
+function formatRevertTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m > 0) return `${m}:${String(s).padStart(2, '0')}`;
+  return `${s}s`;
+}
+
+export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('team');
   const [editingStatus, setEditingStatus] = useState(false);
   const [statusInput, setStatusInput] = useState('');
+  const [showRevertPicker, setShowRevertPicker] = useState<AvailabilityStatus | null>(null);
 
   function handleSetStatusMessage() {
     if (!statusInput.trim()) return;
@@ -156,11 +173,24 @@ export default function DashboardView({ currentUser, peers, timerState, records,
         )}
 
         {/* Status Picker — colored circles */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, justifyContent: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: statusRevertRemaining && statusRevertRemaining > 0 ? 4 : 16, justifyContent: 'center' }}>
           {[AvailabilityStatus.Available, AvailabilityStatus.Occupied, AvailabilityStatus.Focused].map((status) => (
             <button
               key={status}
-              onClick={() => onStatusChange(status)}
+              onClick={() => {
+                if (status === AvailabilityStatus.Occupied || status === AvailabilityStatus.Focused) {
+                  if (showRevertPicker === status) {
+                    setShowRevertPicker(null);
+                  } else {
+                    onStatusChange(status);
+                    setShowRevertPicker(status);
+                  }
+                } else {
+                  onStatusChange(status);
+                  setShowRevertPicker(null);
+                  (window as any).zenstate.cancelStatusRevert?.();
+                }
+              }}
               title={getStatusLabel(status)}
               style={{
                 width: 24,
@@ -177,6 +207,58 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             />
           ))}
         </div>
+
+        {/* Revert time picker */}
+        {showRevertPicker && (
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', width: '100%', textAlign: 'center', marginBottom: 2 }}>
+              Auto-revert to Available after:
+            </span>
+            {REVERT_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                className="category-chip"
+                style={{ fontSize: 10, padding: '2px 8px' }}
+                onClick={() => {
+                  if (opt.seconds > 0) {
+                    (window as any).zenstate.setStatusRevert?.(opt.seconds);
+                  } else {
+                    (window as any).zenstate.cancelStatusRevert?.();
+                  }
+                  setShowRevertPicker(null);
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Status revert countdown */}
+        {statusRevertRemaining !== undefined && statusRevertRemaining > 0 && (
+          <div style={{
+            textAlign: 'center',
+            fontSize: 10,
+            color: 'var(--zen-secondary-text)',
+            marginBottom: 8,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}>
+            <span>⏱ Reverting in {formatRevertTime(statusRevertRemaining)}</span>
+            <button
+              onClick={() => (window as any).zenstate.cancelStatusRevert?.()}
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'var(--zen-tertiary-text)', fontSize: 10, fontFamily: 'inherit',
+                padding: '0 2px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         <div className="divider" style={{ margin: '0 0 12px' }} />
 

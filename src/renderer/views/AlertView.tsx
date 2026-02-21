@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 interface Props {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'adminNotification';
   from: string;
   senderId: string;
   message?: string;
@@ -44,6 +44,73 @@ export default function AlertView({ type, from, senderId, message, accepted, tar
       setSelectedQuickReply(reply);
       setReplyText(reply);
     }
+  }
+
+  // Break reminder view
+  if (type === 'breakReminder') {
+    return (
+      <div className="alert-panel fade-in" style={{ width: 320 }}>
+        <div style={{ textAlign: 'center', fontSize: 36, marginBottom: 12 }}>☕</div>
+        <div className="alert-title" style={{ textAlign: 'center', color: 'var(--status-occupied)' }}>
+          Take a Break!
+        </div>
+        <div style={{
+          textAlign: 'center',
+          fontSize: 13,
+          color: 'var(--zen-secondary-text)',
+          marginBottom: 20,
+          lineHeight: 1.5,
+        }}>
+          {message || 'You\'ve been focused for a while. Take a short break to recharge!'}
+        </div>
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+          onClick={onDismiss}
+        >
+          OK
+        </button>
+      </div>
+    );
+  }
+
+  // Admin notification view
+  if (type === 'adminNotification') {
+    return (
+      <div className="alert-panel fade-in" style={{ width: 320 }}>
+        <div style={{ textAlign: 'center', fontSize: 36, marginBottom: 12 }}>📢</div>
+        <div className="alert-title" style={{ textAlign: 'center', color: 'var(--zen-primary)' }}>
+          Admin Notification
+        </div>
+        <div style={{
+          textAlign: 'center',
+          fontSize: 12,
+          color: 'var(--zen-tertiary-text)',
+          marginBottom: 8,
+        }}>
+          From <strong style={{ color: 'var(--zen-secondary-text)' }}>{from}</strong>
+        </div>
+        <div style={{
+          padding: '12px 14px',
+          background: 'rgba(0, 122, 255, 0.08)',
+          borderRadius: 8,
+          fontSize: 13,
+          color: 'var(--zen-text)',
+          marginBottom: 20,
+          lineHeight: 1.5,
+          textAlign: 'center',
+        }}>
+          {message}
+        </div>
+        <button
+          className="btn btn-primary"
+          style={{ width: '100%' }}
+          onClick={onDismiss}
+        >
+          OK
+        </button>
+      </div>
+    );
   }
 
   // Timer complete view

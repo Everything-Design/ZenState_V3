@@ -25,6 +25,7 @@ export default function App() {
     remaining: undefined as number | undefined,
   });
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
 
   // Load initial data
   useEffect(() => {
@@ -83,6 +84,12 @@ export default function App() {
       setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
     });
 
+    // Listen for status revert countdown
+    window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
+      const tick = data as { remaining: number };
+      setStatusRevertRemaining(tick.remaining);
+    });
+
     // Listen for update notifications
     window.zenstate.on('update:downloaded', (data: unknown) => {
       const info = data as { version: string };
@@ -95,6 +102,7 @@ export default function App() {
       window.zenstate.removeAllListeners(IPC.PEER_LOST);
       window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
       window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
+      window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
     };
   }, []);
@@ -186,6 +194,7 @@ export default function App() {
         currentUser={currentUser}
         peers={peers}
         timerState={timerState}
+        statusRevertRemaining={statusRevertRemaining}
         onStatusChange={handleStatusChange}
         onUserUpdate={handleUserUpdate}
         onOpenSettings={() => setView('settings')}

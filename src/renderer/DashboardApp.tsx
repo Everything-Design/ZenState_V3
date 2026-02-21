@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, AvailabilityStatus, DailyRecord, IPC } from '../shared/types';
+import { User, AvailabilityStatus, DailyRecord, IPC, AppSettings, FocusTemplate } from '../shared/types';
 import DashboardView from './views/DashboardView';
 
 // Type declaration for the preload bridge
@@ -39,6 +39,13 @@ declare global {
       saveCategories: (categories: string[]) => Promise<boolean>;
       getCategoryColors: () => Promise<Record<string, string>>;
       saveCategoryColors: (colors: Record<string, string>) => Promise<boolean>;
+      getSettings: () => Promise<AppSettings>;
+      saveSettings: (settings: AppSettings) => Promise<boolean>;
+      getTemplates: () => Promise<FocusTemplate[]>;
+      saveTemplates: (templates: FocusTemplate[]) => Promise<boolean>;
+      setStatusRevert: (seconds: number) => void;
+      cancelStatusRevert: () => void;
+      sendAdminNotification: (recipientIds: string[] | 'all', message: string) => void;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;
       removeAllListeners: (channel: string) => void;
     };
@@ -66,6 +73,7 @@ export default function DashboardApp() {
   });
   const [records, setRecords] = useState<DailyRecord[]>([]);
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
   const prevTimerRunning = useRef(false);
 
   useEffect(() => {
@@ -126,6 +134,12 @@ export default function DashboardApp() {
       setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
     });
 
+    // Listen for status revert countdown
+    window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
+      const tick = data as { remaining: number };
+      setStatusRevertRemaining(tick.remaining);
+    });
+
     // Listen for update notifications
     window.zenstate.on('update:downloaded', (data: unknown) => {
       const info = data as { version: string };
@@ -138,6 +152,7 @@ export default function DashboardApp() {
       window.zenstate.removeAllListeners(IPC.PEER_LOST);
       window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
       window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
+      window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
     };
   }, [currentUser]);
@@ -246,6 +261,7 @@ export default function DashboardApp() {
         peers={peers}
         timerState={timerState}
         records={records}
+        statusRevertRemaining={statusRevertRemaining}
         onRefreshRecords={refreshRecords}
         onStatusChange={handleStatusChange}
         onUserUpdate={handleUserUpdate}

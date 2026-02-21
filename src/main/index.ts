@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage, dialog, powerMonitor } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { createTray, updateTrayIcon } from './tray';
@@ -7,7 +7,7 @@ import { NetworkingService } from './networking/NetworkingService';
 import { PersistenceService } from './services/persistence';
 import { TimeTracker } from './services/timeTracker';
 import { setupUpdater, checkForUpdate } from './updater';
-import { IPC, AvailabilityStatus, User, MessageType } from '../shared/types';
+import { IPC, AvailabilityStatus, User, MessageType, AppSettings, FocusTemplate } from '../shared/types';
 
 // ── Global Error Safety Net ─────────────────────────────────────
 // Catches any unhandled errors that slip through socket error handlers.
@@ -42,6 +42,17 @@ let timerIsRunning = false;
 let timerTaskLabel = '';
 let timerCategory: string | undefined;
 let timerTargetDuration: number | undefined;
+
+// Break reminder state
+let breakReminderTimeout: NodeJS.Timeout | null = null;
+
+// Status auto-revert state
+let statusRevertTimeout: NodeJS.Timeout | null = null;
+let statusRevertTickInterval: NodeJS.Timeout | null = null;
+let statusRevertEndTime: number | null = null;
+
+// Idle detection state
+let idleCheckInterval: NodeJS.Timeout | null = null;
 
 function isDev(): boolean {
   return !app.isPackaged;
@@ -194,6 +205,11 @@ function startNetworking(user: User) {
     broadcastToWindows(IPC.EMERGENCY_ACCESS, granted);
   });
 
+  networking.on('adminNotification', (data: { from: string; senderId: string; message?: string }) => {
+    broadcastToWindows(IPC.ADMIN_NOTIFICATION_RECEIVED, data);
+    showAdminNotificationAlert({ from: data.from, message: data.message || '' });
+  });
+
   networking.start();
 }
 
@@ -262,6 +278,126 @@ function showTimerCompleteAlert(taskLabel: string, targetDuration: number, statu
   });
 }
 
+// ── Break Reminders ─────────────────────────────────────────────
+
+function scheduleBreakReminder(intervalSeconds: number) {
+  clearBreakReminder();
+  breakReminderTimeout = setTimeout(() => {
+    showBreakReminderAlert();
+    broadcastToWindows(IPC.BREAK_REMINDER, {});
+    // Re-schedule for next interval
+    if (timerIsRunning && !timerIsPaused) {
+      scheduleBreakReminder(intervalSeconds);
+    }
+  }, intervalSeconds * 1000);
+}
+
+function clearBreakReminder() {
+  if (breakReminderTimeout) {
+    clearTimeout(breakReminderTimeout);
+    breakReminderTimeout = null;
+  }
+}
+
+function showBreakReminderAlert() {
+  const alertWin = createAlertWindow(getRendererURL('alert.html'), {
+    width: 360,
+    height: 240,
+  });
+  alertWin.webContents.once('did-finish-load', () => {
+    alertWin.webContents.send('alert-data', {
+      type: 'breakReminder',
+      from: 'Break Reminder',
+      senderId: '',
+      message: 'You\'ve been focused for a while. Take a short break to recharge!',
+    });
+  });
+}
+
+// ── Idle Detection ──────────────────────────────────────────────
+
+function startIdleDetection(thresholdSeconds: number) {
+  stopIdleDetection();
+  idleCheckInterval = setInterval(() => {
+    if (!timerIsRunning || timerIsPaused) return;
+    const idleTime = powerMonitor.getSystemIdleTime();
+    if (idleTime >= thresholdSeconds) {
+      pauseTimer();
+      broadcastToWindows(IPC.TIMER_AUTO_PAUSED, { idleTime });
+      new Notification({
+        title: 'Timer Auto-Paused',
+        body: `Your timer was paused after ${Math.floor(thresholdSeconds / 60)} minutes of inactivity.`,
+      }).show();
+    }
+  }, 10000); // Check every 10 seconds
+}
+
+function stopIdleDetection() {
+  if (idleCheckInterval) {
+    clearInterval(idleCheckInterval);
+    idleCheckInterval = null;
+  }
+}
+
+// ── Status Auto-Revert ─────────────────────────────────────────
+
+function setStatusRevertTimer(seconds: number) {
+  cancelStatusRevertTimer();
+  statusRevertEndTime = Date.now() + seconds * 1000;
+
+  statusRevertTimeout = setTimeout(() => {
+    const user = persistence.getUser();
+    if (user && (user.status === AvailabilityStatus.Occupied || user.status === AvailabilityStatus.Focused)) {
+      user.status = AvailabilityStatus.Available;
+      persistence.saveUser(user);
+      networking?.updateUser(user);
+      updateTrayIcon(user, 0, timerIsRunning);
+      broadcastToWindows(IPC.PEER_UPDATED, user);
+    }
+    cancelStatusRevertTimer();
+  }, seconds * 1000);
+
+  statusRevertTickInterval = setInterval(() => {
+    if (statusRevertEndTime) {
+      const remaining = Math.max(0, Math.floor((statusRevertEndTime - Date.now()) / 1000));
+      broadcastToWindows(IPC.STATUS_REVERT_TICK, { remaining });
+      if (remaining <= 0) {
+        cancelStatusRevertTimer();
+      }
+    }
+  }, 1000);
+}
+
+function cancelStatusRevertTimer() {
+  if (statusRevertTimeout) {
+    clearTimeout(statusRevertTimeout);
+    statusRevertTimeout = null;
+  }
+  if (statusRevertTickInterval) {
+    clearInterval(statusRevertTickInterval);
+    statusRevertTickInterval = null;
+  }
+  statusRevertEndTime = null;
+  broadcastToWindows(IPC.STATUS_REVERT_TICK, { remaining: 0 });
+}
+
+// ── Admin Notification Alert ────────────────────────────────────
+
+function showAdminNotificationAlert(data: { from: string; message: string }) {
+  const alertWin = createAlertWindow(getRendererURL('alert.html'), {
+    width: 360,
+    height: 280,
+  });
+  alertWin.webContents.once('did-finish-load', () => {
+    alertWin.webContents.send('alert-data', {
+      type: 'adminNotification',
+      from: data.from,
+      senderId: '',
+      message: data.message,
+    });
+  });
+}
+
 // ── Timer Logic ────────────────────────────────────────────────
 
 function startTimer(taskLabel: string, category?: string, targetDuration?: number) {
@@ -272,6 +408,17 @@ function startTimer(taskLabel: string, category?: string, targetDuration?: numbe
   timerAccumulatedTime = 0;
   timerIsPaused = false;
   timerIsRunning = true;
+
+  // Start break reminders if enabled
+  const settings = persistence.getSettings();
+  if (settings.breakReminderEnabled) {
+    scheduleBreakReminder(settings.breakReminderIntervalSeconds);
+  }
+
+  // Start idle detection if enabled
+  if (settings.idleDetectionEnabled) {
+    startIdleDetection(settings.idleThresholdSeconds);
+  }
 
   timerInterval = setInterval(() => {
     if (timerIsRunning && !timerIsPaused && timerStartTime) {
@@ -323,6 +470,7 @@ function pauseTimer() {
     timerAccumulatedTime += (Date.now() - timerStartTime.getTime()) / 1000;
     timerStartTime = null;
     timerIsPaused = true;
+    clearBreakReminder();
     const remaining = timerTargetDuration ? Math.max(0, timerTargetDuration - timerAccumulatedTime) : undefined;
     broadcastToWindows(IPC.TIMER_UPDATE, {
       elapsed: timerAccumulatedTime,
@@ -340,6 +488,11 @@ function resumeTimer() {
   if (timerIsPaused) {
     timerStartTime = new Date();
     timerIsPaused = false;
+    // Re-schedule break reminder on resume
+    const settings = persistence.getSettings();
+    if (settings.breakReminderEnabled) {
+      scheduleBreakReminder(settings.breakReminderIntervalSeconds);
+    }
   }
 }
 
@@ -364,6 +517,8 @@ function stopTimer() {
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = null;
   timerStartTime = null;
+  clearBreakReminder();
+  stopIdleDetection();
   timerAccumulatedTime = 0;
   timerIsPaused = false;
   timerIsRunning = false;
@@ -404,6 +559,8 @@ function setupIPC() {
       networking?.updateUser(user);
       updateTrayIcon(user, 0, timerIsRunning);
       broadcastToWindows(IPC.PEER_UPDATED, user);
+      // Cancel status revert when user manually changes status
+      cancelStatusRevertTimer();
     }
   });
 
@@ -548,6 +705,34 @@ function setupIPC() {
   ipcMain.handle('data:save-category-colors', (_e, colors: Record<string, string>) => {
     persistence.saveCategoryColors(colors);
     return true;
+  });
+
+  // App settings
+  ipcMain.handle(IPC.GET_SETTINGS, () => persistence.getSettings());
+  ipcMain.handle(IPC.SAVE_SETTINGS, (_e, settings: AppSettings) => {
+    persistence.saveSettings(settings);
+    return true;
+  });
+
+  // Focus templates
+  ipcMain.handle(IPC.GET_TEMPLATES, () => persistence.getTemplates());
+  ipcMain.handle(IPC.SAVE_TEMPLATES, (_e, templates: FocusTemplate[]) => {
+    persistence.saveTemplates(templates);
+    return true;
+  });
+
+  // Status auto-revert
+  ipcMain.on(IPC.SET_STATUS_REVERT, (_e, data: { seconds: number }) => {
+    setStatusRevertTimer(data.seconds);
+  });
+
+  ipcMain.on(IPC.CANCEL_STATUS_REVERT, () => {
+    cancelStatusRevertTimer();
+  });
+
+  // Admin notifications
+  ipcMain.on(IPC.SEND_ADMIN_NOTIFICATION, (_e, data: { recipientIds: string[] | 'all'; message: string }) => {
+    networking?.sendAdminNotification(data.recipientIds, data.message);
   });
 
   // Avatar photo picker (crops to center square, then resizes to 128x128)

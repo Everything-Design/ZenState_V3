@@ -21,10 +21,19 @@ interface TimerState {
   remaining?: number;
 }
 
+const REVERT_OPTIONS = [
+  { label: '15m', seconds: 15 * 60 },
+  { label: '30m', seconds: 30 * 60 },
+  { label: '1h', seconds: 60 * 60 },
+  { label: '2h', seconds: 2 * 60 * 60 },
+  { label: 'None', seconds: 0 },
+];
+
 interface Props {
   currentUser: User;
   peers: User[];
   timerState: TimerState;
+  statusRevertRemaining?: number;
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onOpenSettings?: () => void;
@@ -61,7 +70,14 @@ function getEndOfDay(): string {
   return d.toISOString();
 }
 
-export default function MenuBarView({ currentUser, peers, timerState, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
+function formatRevertTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m > 0) return `${m}:${String(s).padStart(2, '0')}`;
+  return `${s}s`;
+}
+
+export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
   const [searchText, setSearchText] = useState('');
   const [showTimerInput, setShowTimerInput] = useState(false);
   const [timerTaskInput, setTimerTaskInput] = useState('');
@@ -75,6 +91,7 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
   const [pendingRequests, setPendingRequests] = useState<Record<string, boolean>>({});
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [showRevertPicker, setShowRevertPicker] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
 
   useEffect(() => {
@@ -433,7 +450,16 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
           <button
             key={status}
             className={`status-btn ${status} ${currentUser.status === status ? 'active' : ''}`}
-            onClick={() => onStatusChange(status)}
+            onClick={() => {
+              if (status === AvailabilityStatus.Occupied || status === AvailabilityStatus.Focused) {
+                onStatusChange(status);
+                setShowRevertPicker(true);
+              } else {
+                onStatusChange(status);
+                setShowRevertPicker(false);
+                (window as any).zenstate.cancelStatusRevert?.();
+              }
+            }}
           >
             <span className={`status-dot ${status}`} />
             {status === AvailabilityStatus.Available ? 'Available' :
@@ -441,6 +467,53 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
           </button>
         ))}
       </div>
+
+      {/* Revert picker */}
+      {showRevertPicker && (
+        <div style={{ padding: '4px 16px 0', display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 9, color: 'var(--zen-tertiary-text)' }}>Revert after:</span>
+          {REVERT_OPTIONS.map((opt) => (
+            <button
+              key={opt.label}
+              className="category-chip"
+              style={{ fontSize: 9, padding: '1px 6px' }}
+              onClick={() => {
+                if (opt.seconds > 0) {
+                  (window as any).zenstate.setStatusRevert?.(opt.seconds);
+                } else {
+                  (window as any).zenstate.cancelStatusRevert?.();
+                }
+                setShowRevertPicker(false);
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Status revert countdown */}
+      {statusRevertRemaining !== undefined && statusRevertRemaining > 0 && !showRevertPicker && (
+        <div style={{
+          padding: '2px 16px',
+          fontSize: 9,
+          color: 'var(--zen-secondary-text)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+        }}>
+          <span>⏱ Reverting in {formatRevertTime(statusRevertRemaining)}</span>
+          <button
+            onClick={() => (window as any).zenstate.cancelStatusRevert?.()}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--zen-tertiary-text)', fontSize: 9, fontFamily: 'inherit', padding: 0,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Active Timer Display — single row */}
       {isTimerActive && (

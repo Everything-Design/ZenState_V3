@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Tag, Info, Shield, Wifi } from 'lucide-react';
-import { User } from '../../../shared/types';
+import { User, AppSettings } from '../../../shared/types';
 import { CATEGORY_PALETTE, getCategoryColor } from '../../utils/categoryColors';
 
 // Avatar colors — no green/orange/red (reserved for status indicators)
@@ -57,7 +57,21 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [connectIpInput, setConnectIpInput] = useState('');
   const [connectStatus, setConnectStatus] = useState('');
 
-  const isAdmin = currentUser.username.toLowerCase() === 'saurabh';
+  // App settings (productivity)
+  const [appSettings, setAppSettings] = useState<AppSettings>({
+    dailyFocusGoalSeconds: 6 * 3600,
+    breakReminderEnabled: false,
+    breakReminderIntervalSeconds: 90 * 60,
+    idleDetectionEnabled: false,
+    idleThresholdSeconds: 5 * 60,
+  });
+
+  // Admin notifications
+  const [adminMessage, setAdminMessage] = useState('');
+  const [selectedPeerIds, setSelectedPeerIds] = useState<Set<string>>(new Set());
+  const [notifSent, setNotifSent] = useState(false);
+
+  const isAdmin = currentUser.isAdmin === true;
 
   useEffect(() => {
     (window as any).zenstate.getLoginItemSettings?.().then((enabled: boolean) => {
@@ -76,6 +90,10 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     // Load network info
     (window as any).zenstate.getLocalInfo?.().then((info: { addresses: string[]; port: number }) => {
       setLocalInfo(info);
+    }).catch(() => {});
+    // Load app settings
+    (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
+      if (s) setAppSettings(s);
     }).catch(() => {});
 
     // Listen for auto-update download completion
@@ -119,6 +137,23 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
 
   function handleToggleEmergencyAccess(peerId: string, currentValue: boolean) {
     (window as any).zenstate.grantEmergencyAccess(peerId, !currentValue);
+  }
+
+  function updateAppSettings(updates: Partial<AppSettings>) {
+    const updated = { ...appSettings, ...updates };
+    setAppSettings(updated);
+    (window as any).zenstate.saveSettings?.(updated);
+  }
+
+  function handleSendAdminNotification(broadcast: boolean) {
+    if (!adminMessage.trim()) return;
+    const recipientIds = broadcast ? 'all' as const : Array.from(selectedPeerIds);
+    if (!broadcast && recipientIds.length === 0) return;
+    (window as any).zenstate.sendAdminNotification?.(recipientIds, adminMessage.trim());
+    setAdminMessage('');
+    setSelectedPeerIds(new Set());
+    setNotifSent(true);
+    setTimeout(() => setNotifSent(false), 3000);
   }
 
   async function handleResetApp() {
@@ -449,6 +484,129 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
 
           <div className="divider" />
 
+          {/* Daily Focus Goal */}
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>Productivity</div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, flex: 1 }}>🎯 Daily Focus Goal</span>
+            <input
+              type="number"
+              min="0"
+              max="24"
+              step="0.5"
+              value={appSettings.dailyFocusGoalSeconds / 3600}
+              onChange={(e) => {
+                const hours = parseFloat(e.target.value) || 0;
+                updateAppSettings({ dailyFocusGoalSeconds: Math.round(hours * 3600) });
+              }}
+              className="text-input"
+              style={{ width: 60, textAlign: 'center', fontSize: 12 }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>hours</span>
+          </div>
+
+          {/* Break Reminders */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 13, flex: 1 }}>☕ Break Reminders</span>
+            <button
+              onClick={() => updateAppSettings({ breakReminderEnabled: !appSettings.breakReminderEnabled })}
+              style={{
+                width: 44,
+                height: 24,
+                borderRadius: 12,
+                border: 'none',
+                background: appSettings.breakReminderEnabled ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                cursor: 'pointer',
+                position: 'relative',
+                transition: 'background 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: 'white',
+                position: 'absolute',
+                top: 2,
+                left: appSettings.breakReminderEnabled ? 22 : 2,
+                transition: 'left 0.2s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
+          </div>
+          {appSettings.breakReminderEnabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, paddingLeft: 16 }}>
+              <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1 }}>Remind every</span>
+              <input
+                type="number"
+                min="1"
+                max="480"
+                value={Math.round(appSettings.breakReminderIntervalSeconds / 60)}
+                onChange={(e) => {
+                  const mins = parseInt(e.target.value) || 90;
+                  updateAppSettings({ breakReminderIntervalSeconds: mins * 60 });
+                }}
+                className="text-input"
+                style={{ width: 60, textAlign: 'center', fontSize: 12 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>min</span>
+            </div>
+          )}
+
+          {/* Idle Detection */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 13, flex: 1 }}>💤 Idle Detection</span>
+            <button
+              onClick={() => updateAppSettings({ idleDetectionEnabled: !appSettings.idleDetectionEnabled })}
+              style={{
+                width: 44,
+                height: 24,
+                borderRadius: 12,
+                border: 'none',
+                background: appSettings.idleDetectionEnabled ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                cursor: 'pointer',
+                position: 'relative',
+                transition: 'background 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: 'white',
+                position: 'absolute',
+                top: 2,
+                left: appSettings.idleDetectionEnabled ? 22 : 2,
+                transition: 'left 0.2s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
+          </div>
+          {appSettings.idleDetectionEnabled && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, paddingLeft: 16 }}>
+              <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1 }}>Auto-pause after</span>
+              <input
+                type="number"
+                min="1"
+                max="60"
+                value={Math.round(appSettings.idleThresholdSeconds / 60)}
+                onChange={(e) => {
+                  const mins = parseInt(e.target.value) || 5;
+                  updateAppSettings({ idleThresholdSeconds: mins * 60 });
+                }}
+                className="text-input"
+                style={{ width: 60, textAlign: 'center', fontSize: 12 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>min idle</span>
+            </div>
+          )}
+
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginBottom: 12 }}>
+            Break reminders alert you during long focus sessions. Idle detection auto-pauses the timer when you step away.
+          </div>
+
+          <div className="divider" />
+
           {/* Sign Out */}
           {showSignOutConfirm ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -745,67 +903,143 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
 
       {/* Admin Section */}
       {activeSection === 'admin' && isAdmin && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Emergency Access</div>
-          <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 12 }}>
-            Grant urgent request access to team members in Focus mode
-          </div>
-          {peers.length === 0 ? (
-            <div style={{ fontSize: 12, color: 'var(--zen-tertiary-text)', textAlign: 'center', padding: 16 }}>
-              No team members connected
+        <>
+          <div className="card">
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Emergency Access</div>
+            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 12 }}>
+              Grant urgent request access to team members in Focus mode
             </div>
-          ) : (
-            peers.map((peer) => (
-              <div key={peer.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
-                <div style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: '50%',
-                  background: peer.avatarColor || '#8E8E93',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 14,
-                  overflow: 'hidden',
-                }}>
-                  {peer.avatarImageData ? (
-                    <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : peer.avatarEmoji ? (
-                    peer.avatarEmoji
-                  ) : (
-                    <span style={{ fontSize: 11, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
-                  )}
-                </div>
-                <span style={{ fontSize: 13, flex: 1 }}>{peer.name}</span>
-                <button
-                  onClick={() => handleToggleEmergencyAccess(peer.id, peer.canSendEmergency)}
-                  style={{
-                    width: 44,
-                    height: 24,
-                    borderRadius: 12,
-                    border: 'none',
-                    background: peer.canSendEmergency ? '#FF3B30' : 'var(--zen-secondary-bg)',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    transition: 'background 0.2s ease',
-                  }}
-                >
-                  <div style={{
-                    width: 20,
-                    height: 20,
-                    borderRadius: '50%',
-                    background: 'white',
-                    position: 'absolute',
-                    top: 2,
-                    left: peer.canSendEmergency ? 22 : 2,
-                    transition: 'left 0.2s ease',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                  }} />
-                </button>
+            {peers.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--zen-tertiary-text)', textAlign: 'center', padding: 16 }}>
+                No team members connected
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              peers.map((peer) => (
+                <div key={peer.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0' }}>
+                  <div style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: '50%',
+                    background: peer.avatarColor || '#8E8E93',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 14,
+                    overflow: 'hidden',
+                  }}>
+                    {peer.avatarImageData ? (
+                      <img src={`data:image/png;base64,${peer.avatarImageData}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    ) : peer.avatarEmoji ? (
+                      peer.avatarEmoji
+                    ) : (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: 'white' }}>{peer.name.charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: 13, flex: 1 }}>{peer.name}</span>
+                  <button
+                    onClick={() => handleToggleEmergencyAccess(peer.id, peer.canSendEmergency)}
+                    style={{
+                      width: 44,
+                      height: 24,
+                      borderRadius: 12,
+                      border: 'none',
+                      background: peer.canSendEmergency ? '#FF3B30' : 'var(--zen-secondary-bg)',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'background 0.2s ease',
+                    }}
+                  >
+                    <div style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: '50%',
+                      background: 'white',
+                      position: 'absolute',
+                      top: 2,
+                      left: peer.canSendEmergency ? 22 : 2,
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                    }} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Admin Notifications */}
+          <div className="card" style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>📢 Send Notification</div>
+            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 12 }}>
+              Send a message to specific team members or broadcast to all
+            </div>
+
+            <textarea
+              className="text-input"
+              placeholder="Type your message..."
+              value={adminMessage}
+              onChange={(e) => setAdminMessage(e.target.value)}
+              style={{ width: '100%', minHeight: 60, resize: 'vertical', fontSize: 12, marginBottom: 12, fontFamily: 'inherit' }}
+            />
+
+            {/* Peer selection */}
+            {peers.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Select recipients:</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {peers.map((peer) => (
+                    <label key={peer.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPeerIds.has(peer.id)}
+                        onChange={(e) => {
+                          const next = new Set(selectedPeerIds);
+                          if (e.target.checked) next.add(peer.id);
+                          else next.delete(peer.id);
+                          setSelectedPeerIds(next);
+                        }}
+                        style={{ accentColor: 'var(--zen-primary)' }}
+                      />
+                      <div style={{
+                        width: 20, height: 20, borderRadius: '50%',
+                        background: peer.avatarColor || '#8E8E93',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, overflow: 'hidden',
+                      }}>
+                        {peer.avatarEmoji || peer.name.charAt(0).toUpperCase()}
+                      </div>
+                      {peer.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1, fontSize: 11 }}
+                disabled={!adminMessage.trim() || selectedPeerIds.size === 0}
+                onClick={() => handleSendAdminNotification(false)}
+              >
+                Send to Selected
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{ flex: 1, fontSize: 11, borderColor: 'var(--zen-primary)', color: 'var(--zen-primary)' }}
+                disabled={!adminMessage.trim() || peers.length === 0}
+                onClick={() => handleSendAdminNotification(true)}
+              >
+                Broadcast to All
+              </button>
+            </div>
+
+            {notifSent && (
+              <div style={{ fontSize: 11, color: 'var(--status-available)', marginTop: 8, textAlign: 'center' }}>
+                Notification sent!
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

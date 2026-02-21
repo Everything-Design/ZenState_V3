@@ -173,6 +173,26 @@ export class NetworkingService extends EventEmitter {
     });
   }
 
+  sendAdminNotification(recipientIds: string[] | 'all', message: string) {
+    const msg: PeerMessage = {
+      type: MessageType.AdminNotification,
+      senderId: this.currentUser.id,
+      senderName: this.currentUser.name,
+      timestamp: new Date().toISOString(),
+      requestMessage: message,
+    };
+
+    if (recipientIds === 'all') {
+      for (const socket of this.connections.values()) {
+        this.sendWireMessage(socket, msg);
+      }
+    } else {
+      for (const userId of recipientIds) {
+        this.sendPeerMessage(userId, msg);
+      }
+    }
+  }
+
   grantEmergencyAccess(userId: string, granted: boolean) {
     // Update local peer record so admin UI reflects the change immediately
     const peer = this.peers.get(userId);
@@ -500,6 +520,14 @@ export class NetworkingService extends EventEmitter {
         this.emit('emergencyAccess', granted);
         break;
       }
+
+      case MessageType.AdminNotification:
+        this.emit('adminNotification', {
+          from: message.senderName,
+          senderId: message.senderId,
+          message: message.requestMessage,
+        });
+        break;
     }
   }
 

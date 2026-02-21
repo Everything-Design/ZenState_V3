@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AlertView from './views/AlertView';
 
 interface AlertData {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'adminNotification';
   from: string;
   senderId: string;
   message?: string;
