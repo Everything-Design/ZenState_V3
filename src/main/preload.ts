@@ -46,6 +46,9 @@ const IPC = {
   CANCEL_STATUS_REVERT: 'status:cancel-revert',
   SEND_ADMIN_NOTIFICATION: 'admin:send-notification',
   ADMIN_NOTIFICATION_RECEIVED: 'admin:notification-received',
+  ACTIVATE_LICENSE: 'license:activate',
+  GET_LICENSE_STATE: 'license:get-state',
+  DEACTIVATE_LICENSE: 'license:deactivate',
 } as const;
 
 // Expose safe IPC bridge to renderer
@@ -72,6 +75,9 @@ contextBridge.exposeInMainWorld('zenstate', {
   connectToIP: (host: string, port: number) => ipcRenderer.invoke('network:connect-ip', { host, port }),
   getLocalInfo: () => ipcRenderer.invoke('network:get-local-info'),
   checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
+  activateLicense: (key: string) => ipcRenderer.invoke(IPC.ACTIVATE_LICENSE, key),
+  getLicenseState: () => ipcRenderer.invoke(IPC.GET_LICENSE_STATE),
+  deactivateLicense: () => ipcRenderer.invoke(IPC.DEACTIVATE_LICENSE),
 
   // Send (fire-and-forget)
   updateStatus: (status: string) => ipcRenderer.send(IPC.UPDATE_STATUS, status),
@@ -118,6 +124,7 @@ contextBridge.exposeInMainWorld('zenstate', {
       'update:downloaded',
       'dashboard:switch-tab',
       'settings:updated',
+      'license:changed',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));

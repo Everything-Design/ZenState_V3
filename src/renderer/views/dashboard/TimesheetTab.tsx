@@ -3,9 +3,11 @@ import { Pencil, Trash2, FileText } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
+import { ProBadge } from '../../components/ProGate';
 
 interface Props {
   records: DailyRecord[];
+  isPro: boolean;
   onRefreshRecords: () => void;
 }
 
@@ -57,7 +59,7 @@ function formatDateLabel(dateStr: string): string {
 
 // Category colors are now loaded from persistence via getCategoryColor()
 
-export default function TimesheetTab({ records, onRefreshRecords }: Props) {
+export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props) {
   const [statPeriod, setStatPeriod] = useState<StatPeriod>('today');
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -400,8 +402,14 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
         </span>
         <button className="btn btn-secondary" onClick={() => navigateMonth(1)}>▶</button>
         <div className="spacer" />
-        <button className="btn btn-primary" onClick={handleExportCSV}>
-          📥 Export CSV
+        <button
+          className="btn btn-primary"
+          onClick={handleExportCSV}
+          disabled={!isPro}
+          title={!isPro ? 'Pro feature — upgrade to export CSV' : undefined}
+          style={!isPro ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+        >
+          📥 Export CSV {!isPro && <ProBadge />}
         </button>
       </div>
 

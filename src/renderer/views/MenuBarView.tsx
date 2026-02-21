@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass } from 'lucide-react';
-import { User, AvailabilityStatus, IPC, FocusTemplate, AppSettings, DailyRecord } from '../../shared/types';
+import { User, AvailabilityStatus, IPC, FocusTemplate, AppSettings, DailyRecord, LicenseState } from '../../shared/types';
 
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
 const DURATION_OPTIONS = [
@@ -34,6 +34,7 @@ interface Props {
   peers: User[];
   timerState: TimerState;
   statusRevertRemaining?: number;
+  isPro: boolean;
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onOpenSettings?: () => void;
@@ -77,7 +78,7 @@ function formatRevertTime(seconds: number): string {
   return `${s}s`;
 }
 
-export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
+export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
   const [searchText, setSearchText] = useState('');
   const [showTimerInput, setShowTimerInput] = useState(false);
   const [timerTaskInput, setTimerTaskInput] = useState('');
@@ -330,8 +331,8 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             }}
           />
 
-          {/* Focus Templates */}
-          {templates.length > 0 && (
+          {/* Focus Templates (Pro only) */}
+          {templates.length > 0 && isPro && (
             <div>
               <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Templates</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -531,8 +532,8 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         ))}
       </div>
 
-      {/* Revert picker */}
-      {showRevertPicker && (
+      {/* Revert picker (Pro only) */}
+      {showRevertPicker && isPro && (
         <div style={{ padding: '4px 16px 0', display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 9, color: 'var(--zen-tertiary-text)' }}>Revert after:</span>
           {REVERT_OPTIONS.map((opt) => (

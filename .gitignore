@@ -9,3 +9,4 @@ dist/
 *.rpm
 .DS_Store
 .vite/
+scripts/keys/

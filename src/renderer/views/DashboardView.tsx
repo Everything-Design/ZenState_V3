@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Timer, ClipboardList, Settings, MessageCircle } from 'lucide-react';
-import { User, AvailabilityStatus, DailyRecord } from '../../shared/types';
+import { User, AvailabilityStatus, DailyRecord, LicenseState } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimerTab from './dashboard/TimerTab';
 import TimesheetTab from './dashboard/TimesheetTab';
@@ -21,6 +21,9 @@ interface Props {
   records: DailyRecord[];
   statusRevertRemaining?: number;
   requestedTab?: string;
+  isPro: boolean;
+  licenseState: LicenseState;
+  onLicenseStateChange: (state: LicenseState) => void;
   onRequestedTabHandled?: () => void;
   onRefreshRecords: () => void;
   onStatusChange: (status: AvailabilityStatus) => void;
@@ -63,7 +66,7 @@ function formatRevertTime(seconds: number): string {
   return `${s}s`;
 }
 
-export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, requestedTab, onRequestedTabHandled, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
+export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, requestedTab, isPro, licenseState, onLicenseStateChange, onRequestedTabHandled, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('team');
 
   useEffect(() => {
@@ -217,8 +220,8 @@ export default function DashboardView({ currentUser, peers, timerState, records,
           ))}
         </div>
 
-        {/* Revert time picker */}
-        {showRevertPicker && (
+        {/* Revert time picker (Pro only) */}
+        {showRevertPicker && isPro && (
           <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', width: '100%', textAlign: 'center', marginBottom: 2 }}>
               Auto-revert to Available after:
@@ -313,12 +316,14 @@ export default function DashboardView({ currentUser, peers, timerState, records,
           <TimerTab
             timerState={timerState}
             records={records}
+            isPro={isPro}
             onRefreshRecords={onRefreshRecords}
           />
         )}
         {activeTab === 'timesheet' && (
           <TimesheetTab
             records={records}
+            isPro={isPro}
             onRefreshRecords={onRefreshRecords}
           />
         )}
@@ -326,6 +331,9 @@ export default function DashboardView({ currentUser, peers, timerState, records,
           <SettingsTab
             currentUser={currentUser}
             peers={peers}
+            isPro={isPro}
+            licenseState={licenseState}
+            onLicenseStateChange={onLicenseStateChange}
             onUserUpdate={onUserUpdate}
             onSignOut={onSignOut}
           />

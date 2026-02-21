@@ -8,6 +8,7 @@ import { PersistenceService } from './services/persistence';
 import { TimeTracker } from './services/timeTracker';
 import { setupUpdater, checkForUpdate } from './updater';
 import { IPC, AvailabilityStatus, User, MessageType, AppSettings, FocusTemplate } from '../shared/types';
+import { LicenseManager } from './services/licenseManager';
 
 // ── Global Error Safety Net ─────────────────────────────────────
 // Catches any unhandled errors that slip through socket error handlers.
@@ -32,6 +33,7 @@ let networking: NetworkingService | null = null;
 
 const persistence = new PersistenceService();
 const timeTracker = new TimeTracker(persistence);
+const licenseManager = new LicenseManager();
 
 // Timer state
 let timerInterval: NodeJS.Timeout | null = null;
@@ -165,6 +167,11 @@ function startNetworking(user: User) {
   networking = new NetworkingService(user);
 
   networking.on('peerDiscovered', (peer: User) => {
+    // Free tier: cap at 3 visible peers
+    if (!licenseManager.isPro()) {
+      const currentPeers = networking?.getPeers() ?? [];
+      if (currentPeers.length > 3) return; // Don't broadcast beyond cap
+    }
     broadcastToWindows(IPC.PEER_DISCOVERED, peer);
   });
 
@@ -786,6 +793,24 @@ function setupIPC() {
       };
     }
     return { addresses: [], port: 0 };
+  });
+
+  // License management
+  ipcMain.handle(IPC.ACTIVATE_LICENSE, (_e, key: string) => {
+    const state = licenseManager.activateLicense(key);
+    broadcastToWindows('license:changed', state);
+    return state;
+  });
+
+  ipcMain.handle(IPC.GET_LICENSE_STATE, () => {
+    return licenseManager.getLicenseState();
+  });
+
+  ipcMain.handle(IPC.DEACTIVATE_LICENSE, () => {
+    licenseManager.deactivateLicense();
+    const state = licenseManager.getLicenseState();
+    broadcastToWindows('license:changed', state);
+    return state;
   });
 }
 

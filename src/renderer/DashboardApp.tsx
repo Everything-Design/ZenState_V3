@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, AvailabilityStatus, DailyRecord, IPC, AppSettings, FocusTemplate } from '../shared/types';
+import { User, AvailabilityStatus, DailyRecord, IPC, AppSettings, FocusTemplate, LicenseState } from '../shared/types';
 import DashboardView from './views/DashboardView';
 
 // Type declaration for the preload bridge
@@ -46,6 +46,9 @@ declare global {
       setStatusRevert: (seconds: number) => void;
       cancelStatusRevert: () => void;
       sendAdminNotification: (recipientIds: string[] | 'all', message: string) => void;
+      activateLicense: (key: string) => Promise<LicenseState>;
+      getLicenseState: () => Promise<LicenseState>;
+      deactivateLicense: () => Promise<LicenseState>;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;
       removeAllListeners: (channel: string) => void;
     };
@@ -75,6 +78,7 @@ export default function DashboardApp() {
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
   const [requestedTab, setRequestedTab] = useState<string | undefined>(undefined);
+  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, payload: null });
   const prevTimerRunning = useRef(false);
 
   useEffect(() => {
@@ -87,6 +91,8 @@ export default function DashboardApp() {
       }
       const allRecords = await window.zenstate.getRecords() as DailyRecord[];
       setRecords(allRecords);
+      const license = await window.zenstate.getLicenseState();
+      setLicenseState(license);
     }
     init();
   }, []);
@@ -152,6 +158,11 @@ export default function DashboardApp() {
       setRequestedTab(tab as string);
     });
 
+    // Listen for license state changes
+    window.zenstate.on('license:changed', (state: unknown) => {
+      setLicenseState(state as LicenseState);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
@@ -161,6 +172,7 @@ export default function DashboardApp() {
       window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
       window.zenstate.removeAllListeners('dashboard:switch-tab');
+      window.zenstate.removeAllListeners('license:changed');
     };
   }, [currentUser]);
 
@@ -270,6 +282,9 @@ export default function DashboardApp() {
         records={records}
         statusRevertRemaining={statusRevertRemaining}
         requestedTab={requestedTab}
+        isPro={licenseState.isPro}
+        licenseState={licenseState}
+        onLicenseStateChange={setLicenseState}
         onRequestedTabHandled={() => setRequestedTab(undefined)}
         onRefreshRecords={refreshRecords}
         onStatusChange={handleStatusChange}

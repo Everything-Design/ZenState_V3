@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, AvailabilityStatus, IPC } from '../shared/types';
+import { User, AvailabilityStatus, IPC, LicenseState } from '../shared/types';
 import LoginView from './views/LoginView';
 import MenuBarView from './views/MenuBarView';
 import SettingsView from './views/SettingsView';
@@ -26,6 +26,7 @@ export default function App() {
   });
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
+  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, payload: null });
 
   // Load initial data
   useEffect(() => {
@@ -36,6 +37,8 @@ export default function App() {
         const peerList = await window.zenstate.getPeers();
         setPeers(peerList);
       }
+      const license = await window.zenstate.getLicenseState();
+      setLicenseState(license);
       setLoading(false);
     }
     init();
@@ -96,6 +99,11 @@ export default function App() {
       setUpdateAvailable(info.version);
     });
 
+    // Listen for license state changes
+    window.zenstate.on('license:changed', (state: unknown) => {
+      setLicenseState(state as LicenseState);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
@@ -104,6 +112,7 @@ export default function App() {
       window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
       window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
+      window.zenstate.removeAllListeners('license:changed');
     };
   }, []);
 
@@ -195,6 +204,7 @@ export default function App() {
         peers={peers}
         timerState={timerState}
         statusRevertRemaining={statusRevertRemaining}
+        isPro={licenseState.isPro}
         onStatusChange={handleStatusChange}
         onUserUpdate={handleUserUpdate}
         onOpenSettings={() => setView('settings')}

@@ -102,6 +102,23 @@ export interface AppSettings {
   idleThresholdSeconds: number;
 }
 
+// ── License Types ──────────────────────────────────────────────
+
+export interface LicensePayload {
+  teamName: string;
+  seats: number;
+  expiresAt: string; // ISO date
+  features: string[];
+  issuedAt: string;  // ISO date
+}
+
+export interface LicenseState {
+  isValid: boolean;
+  isPro: boolean;
+  payload: LicensePayload | null;
+  error?: string;
+}
+
 // IPC channel names for main ↔ renderer communication
 export const IPC = {
   // Networking events (main → renderer)
@@ -166,4 +183,9 @@ export const IPC = {
 
   // Tray updates (renderer → main)
   UPDATE_TRAY: 'tray:update',
+
+  // License (renderer → main)
+  ACTIVATE_LICENSE: 'license:activate',
+  GET_LICENSE_STATE: 'license:get-state',
+  DEACTIVATE_LICENSE: 'license:deactivate',
 } as const;

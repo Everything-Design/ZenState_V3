@@ -3,6 +3,7 @@ import { Pencil, Trash2, Hourglass, FileText } from 'lucide-react';
 import { DailyRecord, DailySession, FocusTemplate, AppSettings } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
+import { ProBadge } from '../../components/ProGate';
 
 
 interface TimerState {
@@ -18,6 +19,7 @@ interface TimerState {
 interface Props {
   timerState: TimerState;
   records: DailyRecord[];
+  isPro: boolean;
   onRefreshRecords: () => void;
 }
 
@@ -51,7 +53,7 @@ const DURATION_PRESETS = [
   { label: '2h', seconds: 120 * 60 },
 ];
 
-export default function TimerTab({ timerState, records, onRefreshRecords }: Props) {
+export default function TimerTab({ timerState, records, isPro, onRefreshRecords }: Props) {
   const [showInput, setShowInput] = useState(false);
   const [taskInput, setTaskInput] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('');
@@ -344,10 +346,23 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
         </div>
       )}
 
-      {/* Focus Templates (idle state) */}
+      {/* Focus Templates (idle state) — Pro only */}
       {!isTimerActive && !showInput && (
         <>
-          {templates.length > 0 && (
+          {templates.length > 0 && !isPro && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '10px 14px', borderRadius: 10,
+              background: 'var(--zen-tertiary-bg)', marginBottom: 12,
+              border: '1px solid var(--zen-divider)',
+            }}>
+              <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)', flex: 1 }}>
+                Focus Templates <ProBadge />
+              </span>
+              <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>Upgrade to unlock</span>
+            </div>
+          )}
+          {templates.length > 0 && isPro && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
               {templates.map((t) => (
                 <button
@@ -389,8 +404,8 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
         </>
       )}
 
-      {/* Daily Focus Goal Progress */}
-      {dailyGoalSeconds > 0 && (
+      {/* Daily Focus Goal Progress (Pro only) */}
+      {dailyGoalSeconds > 0 && isPro && (
         <div className="card" style={{ marginBottom: 12, padding: '12px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 600 }}>

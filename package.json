@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "3.0.23",
+  "version": "3.0.24",
   "description": "ZenState - Everything Flow",
   "main": "dist/main/index.js",
   "scripts": {
@@ -17,7 +17,7 @@
     "publish:win": "npm run build && electron-builder --win --publish always"
   },
   "author": "ZenState",
-  "license": "MIT",
+  "license": "PROPRIETARY",
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
@@ -77,9 +77,10 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": false
+      "allowToChangeInstallationDirectory": false,
+      "license": "build/license.rtf"
     },
     "files": [
       "dist/main/**/*",

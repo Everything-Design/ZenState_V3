@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Tag, Info, Shield, Wifi, Clock } from 'lucide-react';
-import { User, AppSettings, FocusTemplate } from '../../../shared/types';
+import { Settings, Tag, Info, Shield, Wifi, Clock, KeyRound } from 'lucide-react';
+import { User, AppSettings, FocusTemplate, LicenseState } from '../../../shared/types';
 import { CATEGORY_PALETTE, getCategoryColor } from '../../utils/categoryColors';
+import { ProBadge, ProGate } from '../../components/ProGate';
+import LicenseActivationModal from '../../components/LicenseActivationModal';
 
 // Avatar colors — no green/orange/red (reserved for status indicators)
 const COLOR_OPTIONS = ['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#00C7BE', '#5AC8FA', '#BF5AF2', '#A2845E'];
@@ -23,13 +25,16 @@ const EMOJI_OPTIONS = [
 interface Props {
   currentUser: User;
   peers: User[];
+  isPro: boolean;
+  licenseState: LicenseState;
+  onLicenseStateChange: (state: LicenseState) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onSignOut: () => void;
 }
 
-type SettingsSection = 'general' | 'categories' | 'templates' | 'network' | 'about' | 'admin';
+type SettingsSection = 'general' | 'categories' | 'templates' | 'network' | 'about' | 'admin' | 'license';
 
-export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOut }: Props) {
+export default function SettingsTab({ currentUser, peers, isPro, licenseState, onLicenseStateChange, onUserUpdate, onSignOut }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [launchAtLogin, setLaunchAtLogin] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -81,6 +86,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [editTemplateDuration, setEditTemplateDuration] = useState(25);
   const [editTemplateCategory, setEditTemplateCategory] = useState('');
 
+  const [showLicenseModal, setShowLicenseModal] = useState(false);
   const isAdmin = currentUser.isAdmin === true;
 
   useEffect(() => {
@@ -266,16 +272,21 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     );
   }
 
-  const sections: { id: SettingsSection; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
+  const sections: { id: SettingsSection; label: string; icon: React.ReactNode; adminOnly?: boolean; proOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: <Settings size={16} /> },
     { id: 'categories', label: 'Categories', icon: <Tag size={16} /> },
-    { id: 'templates', label: 'Templates', icon: <Clock size={16} /> },
+    { id: 'templates', label: 'Templates', icon: <Clock size={16} />, proOnly: true },
     { id: 'network', label: 'Network', icon: <Wifi size={16} /> },
+    { id: 'license', label: 'License', icon: <KeyRound size={16} /> },
     { id: 'about', label: 'About', icon: <Info size={16} /> },
-    { id: 'admin', label: 'Admin', icon: <Shield size={16} />, adminOnly: true },
+    { id: 'admin', label: 'Admin', icon: <Shield size={16} />, adminOnly: true, proOnly: true },
   ];
 
-  const visibleSections = sections.filter((s) => !s.adminOnly || isAdmin);
+  const visibleSections = sections.filter((s) => {
+    if (s.adminOnly && !isAdmin) return false;
+    if (s.proOnly && !isPro) return false;
+    return true;
+  });
 
   return (
     <div className="fade-in">
@@ -500,9 +511,12 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
 
           <div className="divider" />
 
-          {/* Daily Focus Goal */}
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>Productivity</div>
+          {/* Productivity (Pro features) */}
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>
+            Productivity {!isPro && <ProBadge />}
+          </div>
 
+          <ProGate isPro={isPro} label="Upgrade to Pro">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 13, flex: 1 }}>🎯 Daily Focus Goal</span>
             <button
@@ -656,6 +670,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginBottom: 12 }}>
             Break reminders alert you during long focus sessions. Idle detection auto-pauses the timer when you step away.
           </div>
+          </ProGate>
 
           <div className="divider" />
 
@@ -1189,6 +1204,89 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
             )}
           </div>
         </div>
+      )}
+
+      {/* License Section */}
+      {activeSection === 'license' && (
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>License</div>
+
+          {licenseState.isValid && licenseState.payload ? (
+            <>
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: 'rgba(52, 199, 89, 0.08)',
+                border: '1px solid rgba(52, 199, 89, 0.2)',
+                marginBottom: 16,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--status-available)', marginBottom: 6 }}>
+                  ZenState Pro — Active
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 2 }}>
+                  Team: {licenseState.payload.teamName}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 2 }}>
+                  Seats: {licenseState.payload.seats}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>
+                  Expires: {new Date(licenseState.payload.expiresAt).toLocaleDateString()}
+                </div>
+              </div>
+              <button
+                className="btn btn-danger"
+                style={{ width: '100%' }}
+                onClick={async () => {
+                  await (window as any).zenstate.deactivateLicense();
+                  const state = await (window as any).zenstate.getLicenseState();
+                  onLicenseStateChange(state);
+                }}
+              >
+                Deactivate License
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: 'var(--zen-tertiary-bg)',
+                border: '1px solid var(--zen-divider)',
+                marginBottom: 16,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                  Free Plan
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 8 }}>
+                  Upgrade to ZenState Pro to unlock templates, CSV export, productivity tools, admin panel, and unlimited peers.
+                </div>
+                {licenseState.error && (
+                  <div style={{ fontSize: 11, color: '#FF3B30', marginTop: 4 }}>
+                    {licenseState.error}
+                  </div>
+                )}
+              </div>
+              <button
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+                onClick={() => setShowLicenseModal(true)}
+              >
+                Activate License Key
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* License Activation Modal */}
+      {showLicenseModal && (
+        <LicenseActivationModal
+          onClose={() => setShowLicenseModal(false)}
+          onActivated={(state) => {
+            onLicenseStateChange(state);
+            setShowLicenseModal(false);
+          }}
+        />
       )}
 
       {/* Admin Section */}
