@@ -76,10 +76,15 @@ function generateLicense(opts) {
     process.exit(1);
   }
 
+  const isLifetime = opts.lifetime === true || expires === 'lifetime' || expires === 'never';
+  const expiresAt = isLifetime
+    ? '9999-12-31'
+    : (expires || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
   const payload = {
     teamName: team,
     seats: parseInt(seats) || 1,
-    expiresAt: expires || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    expiresAt,
     features: features ? features.split(',') : ['pro'],
     issuedAt: new Date().toISOString(),
   };
@@ -117,6 +122,7 @@ if (args.help) {
   console.log('  --team <name>       Team/company name (required)');
   console.log('  --seats <number>    Number of seats (default: 1)');
   console.log('  --expires <date>    Expiry date YYYY-MM-DD (default: 1 year from now)');
+  console.log('  --lifetime          Generate a lifetime license (no expiry)');
   console.log('  --features <list>   Comma-separated features (default: pro)');
   console.log('  --show-public-key   Print the public key for embedding in the app');
   console.log('  --help              Show this help');

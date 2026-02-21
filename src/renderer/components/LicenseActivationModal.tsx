@@ -44,9 +44,10 @@ export default function LicenseActivationModal({ onClose, onActivated }: Props) 
           width: 420,
           maxWidth: '90vw',
           padding: 24,
-          background: 'var(--zen-bg)',
+          background: '#1a1a2e',
           borderRadius: 16,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,255,255,0.08)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -92,7 +93,7 @@ export default function LicenseActivationModal({ onClose, onActivated }: Props) 
                   Seats: {result.payload.seats}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>
-                  Expires: {new Date(result.payload.expiresAt).toLocaleDateString()}
+                  Expires: {result.payload.expiresAt === '9999-12-31' ? 'Lifetime' : new Date(result.payload.expiresAt).toLocaleDateString()}
                 </div>
               </div>
             ) : (
