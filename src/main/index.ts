@@ -492,6 +492,8 @@ function setupIPC() {
     persistence.saveUser(user);
     startNetworking(user);
     updateTrayIcon(user, 0, false);
+    // Default Launch at Login to ON for new users
+    app.setLoginItemSettings({ openAtLogin: true });
   });
 
   // Sign out
@@ -548,7 +550,7 @@ function setupIPC() {
     return true;
   });
 
-  // Avatar photo picker
+  // Avatar photo picker (crops to center square, then resizes to 128x128)
   ipcMain.handle('dialog:pick-avatar-image', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
@@ -558,7 +560,16 @@ function setupIPC() {
     const filePath = result.filePaths[0];
     const fileData = fs.readFileSync(filePath);
     const img = nativeImage.createFromBuffer(fileData);
-    const resized = img.resize({ width: 128, height: 128 });
+    const { width, height } = img.getSize();
+    // Crop to center square
+    let cropped = img;
+    if (width !== height) {
+      const side = Math.min(width, height);
+      const x = Math.floor((width - side) / 2);
+      const y = Math.floor((height - side) / 2);
+      cropped = img.crop({ x, y, width: side, height: side });
+    }
+    const resized = cropped.resize({ width: 128, height: 128 });
     return resized.toPNG().toString('base64');
   });
 

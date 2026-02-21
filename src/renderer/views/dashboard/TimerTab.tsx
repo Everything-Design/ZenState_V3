@@ -148,9 +148,9 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                   fontSize: 10,
                   padding: '2px 8px',
                   borderRadius: 10,
-                  background: `${catColor}22`,
+                  background: `${catColor}40`,
                   color: catColor,
-                  border: `1px solid ${catColor}33`,
+                  border: `1px solid ${catColor}55`,
                   display: 'inline-block',
                   marginBottom: 8,
                 }}>

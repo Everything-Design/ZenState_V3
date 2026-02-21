@@ -33,7 +33,7 @@ export default function LoginView({ onLogin }: Props) {
   return (
     <div className="popover">
       <form className="login-view" onSubmit={handleSubmit}>
-        <img src="/icon.png" alt="ZenState" style={{ width: 56, height: 56, borderRadius: 12, marginBottom: 8 }} />
+        <img src="./icon.png" alt="ZenState" style={{ width: 56, height: 56, borderRadius: 12, marginBottom: 8 }} />
         <div className="login-title">Welcome to ZenState</div>
         <div className="login-subtitle">
           Team presence & availability.<br />

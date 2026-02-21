@@ -28,9 +28,9 @@ export function categoryTagStyle(color: string): React.CSSProperties {
     fontSize: 9,
     padding: '1px 6px',
     borderRadius: 8,
-    background: `${color}22`,
+    background: `${color}40`,
     color: color,
-    border: `1px solid ${color}33`,
+    border: `1px solid ${color}55`,
     display: 'inline-block',
   };
 }
