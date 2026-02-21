@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Settings, Timer, LayoutDashboard } from 'lucide-react';
-import { User, AvailabilityStatus, IPC } from '../../shared/types';
+import { User, AvailabilityStatus, IPC, FocusTemplate, AppSettings, DailyRecord } from '../../shared/types';
 
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
 const DURATION_OPTIONS = [
@@ -93,10 +93,25 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   const [messageText, setMessageText] = useState('');
   const [showRevertPicker, setShowRevertPicker] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
+  const [templates, setTemplates] = useState<FocusTemplate[]>([]);
+  const [dailyGoalSeconds, setDailyGoalSeconds] = useState(0);
+  const [todayTotal, setTodayTotal] = useState(0);
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
       setCategories(cats || []);
+    }).catch(() => {});
+    (window as any).zenstate.getTemplates?.().then((t: FocusTemplate[]) => {
+      setTemplates(t || []);
+    }).catch(() => {});
+    (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
+      setDailyGoalSeconds(s?.dailyFocusGoalSeconds || 0);
+    }).catch(() => {});
+    (window as any).zenstate.getRecords?.().then((records: DailyRecord[]) => {
+      const d = new Date();
+      const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const todayRec = records?.find((r: DailyRecord) => r.date.startsWith(todayStr));
+      setTodayTotal(todayRec?.totalFocusTime || 0);
     }).catch(() => {});
   }, []);
 
@@ -552,6 +567,66 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         </div>
       )}
 
+      {/* Focus Templates (when timer not active) */}
+      {!isTimerActive && templates.length > 0 && (
+        <div style={{ padding: '4px 16px 2px', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          {templates.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => {
+                window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '3px 10px',
+                borderRadius: 14,
+                background: 'var(--zen-secondary-bg)',
+                border: '1px solid var(--zen-divider)',
+                cursor: 'pointer',
+                fontSize: 10,
+                color: 'var(--zen-text)',
+                fontFamily: 'inherit',
+                transition: 'background 0.15s ease, border-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
+            >
+              <span style={{ fontWeight: 500 }}>{t.name}</span>
+              <span style={{ color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Daily Focus Goal Progress */}
+      {dailyGoalSeconds > 0 && (() => {
+        const effectiveTotal = todayTotal + (timerState.isRunning || timerState.isPaused ? timerState.elapsed : 0);
+        const progress = Math.min(1, effectiveTotal / dailyGoalSeconds);
+        const complete = effectiveTotal >= dailyGoalSeconds;
+        return (
+          <div style={{ padding: '4px 16px 2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+              <span style={{ fontSize: 9, color: 'var(--zen-tertiary-text)' }}>
+                {complete ? '🎉' : '🎯'} Daily Goal
+              </span>
+              <span style={{ fontSize: 9, color: complete ? 'var(--status-available)' : 'var(--zen-tertiary-text)' }}>
+                {formatDuration(effectiveTotal)} / {formatDuration(dailyGoalSeconds)}
+              </span>
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: 'var(--zen-tertiary-bg)', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                background: complete ? 'var(--status-available)' : 'var(--zen-primary)',
+                width: `${progress * 100}%`,
+                transition: 'width 0.5s ease',
+              }} />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Presence Bar */}
       <div className="presence-bar">
         <div className="presence-track">
@@ -707,7 +782,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
       {/* Footer */}
       <div className="footer">
         <div className="footer-utils">
-          <button className="footer-icon-btn" onClick={() => onOpenSettings?.()} title="Settings">
+          <button className="footer-icon-btn" onClick={() => window.zenstate.openDashboard()} title="Settings">
             <Settings size={15} />
           </button>
           <button className="footer-icon-btn" onClick={() => setShowTimerInput(true)} title="Record Time">

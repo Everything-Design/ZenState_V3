@@ -21,7 +21,7 @@ export default function LoginView({ onLogin }: Props) {
       lastSeen: new Date().toISOString(),
       totalFocusTime: 0,
       focusSessionCount: 0,
-      isAdmin: username.trim().toLowerCase() === 'saurabh',
+      isAdmin: false,
       canSendEmergency: false,
       avatarEmoji: '😊',
       avatarColor: '#007AFF',

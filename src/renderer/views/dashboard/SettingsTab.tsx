@@ -59,7 +59,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
 
   // App settings (productivity)
   const [appSettings, setAppSettings] = useState<AppSettings>({
-    dailyFocusGoalSeconds: 6 * 3600,
+    dailyFocusGoalSeconds: 0,
     breakReminderEnabled: false,
     breakReminderIntervalSeconds: 90 * 60,
     idleDetectionEnabled: false,
@@ -487,23 +487,59 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           {/* Daily Focus Goal */}
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>Productivity</div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 13, flex: 1 }}>🎯 Daily Focus Goal</span>
-            <input
-              type="number"
-              min="0"
-              max="24"
-              step="0.5"
-              value={appSettings.dailyFocusGoalSeconds / 3600}
-              onChange={(e) => {
-                const hours = parseFloat(e.target.value) || 0;
-                updateAppSettings({ dailyFocusGoalSeconds: Math.round(hours * 3600) });
+            <button
+              onClick={() => {
+                if (appSettings.dailyFocusGoalSeconds > 0) {
+                  updateAppSettings({ dailyFocusGoalSeconds: 0 });
+                } else {
+                  updateAppSettings({ dailyFocusGoalSeconds: 6 * 3600 });
+                }
               }}
-              className="text-input"
-              style={{ width: 60, textAlign: 'center', fontSize: 12 }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>hours</span>
+              style={{
+                width: 44,
+                height: 24,
+                borderRadius: 12,
+                border: 'none',
+                background: appSettings.dailyFocusGoalSeconds > 0 ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                cursor: 'pointer',
+                position: 'relative',
+                transition: 'background 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: 'white',
+                position: 'absolute',
+                top: 2,
+                left: appSettings.dailyFocusGoalSeconds > 0 ? 22 : 2,
+                transition: 'left 0.2s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
           </div>
+          {appSettings.dailyFocusGoalSeconds > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, paddingLeft: 16 }}>
+              <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1 }}>Target</span>
+              <input
+                type="number"
+                min="0.5"
+                max="24"
+                step="0.5"
+                value={appSettings.dailyFocusGoalSeconds / 3600}
+                onChange={(e) => {
+                  const hours = parseFloat(e.target.value) || 6;
+                  updateAppSettings({ dailyFocusGoalSeconds: Math.round(hours * 3600) });
+                }}
+                className="text-input"
+                style={{ width: 60, textAlign: 'center', fontSize: 12 }}
+              />
+              <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>hours</span>
+            </div>
+          )}
 
           {/* Break Reminders */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>

@@ -3,14 +3,6 @@ import { DailyRecord, DailySession, FocusTemplate, AppSettings } from '../../../
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
 
-const TEMPLATE_ICONS: Record<string, string> = {
-  brain: '🧠',
-  code: '💻',
-  pencil: '✏️',
-  palette: '🎨',
-  calendar: '📅',
-  zap: '⚡',
-};
 
 interface TimerState {
   elapsed: number;
@@ -71,6 +63,10 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<FocusTemplate[]>([]);
   const [dailyGoalSeconds, setDailyGoalSeconds] = useState(0);
+  const [showNewTemplate, setShowNewTemplate] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateDuration, setNewTemplateDuration] = useState(25);
+  const [newTemplateCategory, setNewTemplateCategory] = useState('');
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
@@ -349,30 +345,146 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
       {/* Focus Templates (idle state) */}
       {!isTimerActive && !showInput && (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
             {templates.map((t) => (
               <div
                 key={t.id}
-                className="card"
                 style={{
-                  textAlign: 'center',
-                  padding: '16px 8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 14px',
+                  borderRadius: 20,
+                  background: 'var(--zen-secondary-bg)',
+                  border: '1px solid var(--zen-divider)',
                   cursor: 'pointer',
-                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
-                  borderLeft: `3px solid ${t.color}`,
+                  fontSize: 12,
+                  transition: 'background 0.15s ease, border-color 0.15s ease',
+                  position: 'relative',
                 }}
                 onClick={() => {
                   window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.02)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = ''; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
               >
-                <div style={{ fontSize: 24, marginBottom: 6 }}>{TEMPLATE_ICONS[t.icon] || '⏱'}</div>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2, lineHeight: 1.2 }}>{t.name}</div>
-                <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</div>
+                <span style={{ fontWeight: 500 }}>{t.name}</span>
+                <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const updated = templates.filter((x) => x.id !== t.id);
+                    setTemplates(updated);
+                    window.zenstate.saveTemplates(updated);
+                  }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--zen-tertiary-text)', fontSize: 12, padding: '0 0 0 2px',
+                    lineHeight: 1, fontFamily: 'inherit',
+                  }}
+                  title="Delete template"
+                >
+                  ×
+                </button>
               </div>
             ))}
+            <button
+              onClick={() => setShowNewTemplate(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '6px 14px',
+                borderRadius: 20,
+                background: 'transparent',
+                border: '1px dashed var(--zen-divider)',
+                cursor: 'pointer',
+                fontSize: 12,
+                color: 'var(--zen-tertiary-text)',
+                transition: 'border-color 0.15s ease, color 0.15s ease',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--zen-primary)'; e.currentTarget.style.color = 'var(--zen-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--zen-divider)'; e.currentTarget.style.color = 'var(--zen-tertiary-text)'; }}
+            >
+              + Template
+            </button>
           </div>
+
+          {/* New template form */}
+          {showNewTemplate && (
+            <div className="card fade-in" style={{ marginBottom: 12, padding: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>New Template</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input
+                  className="text-input"
+                  placeholder="Template name"
+                  value={newTemplateName}
+                  onChange={(e) => setNewTemplateName(e.target.value)}
+                  autoFocus
+                  style={{ flex: 1, fontSize: 12 }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setShowNewTemplate(false);
+                  }}
+                />
+                <input
+                  className="text-input"
+                  type="number"
+                  min="1"
+                  placeholder="Min"
+                  value={newTemplateDuration}
+                  onChange={(e) => setNewTemplateDuration(parseInt(e.target.value) || 25)}
+                  style={{ width: 60, fontSize: 12, textAlign: 'center' }}
+                />
+                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
+              </div>
+              {categories.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      className={`category-chip ${newTemplateCategory === cat ? 'selected' : ''}`}
+                      onClick={() => setNewTemplateCategory(newTemplateCategory === cat ? '' : cat)}
+                      style={{ fontSize: 10 }}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => { setShowNewTemplate(false); setNewTemplateName(''); setNewTemplateCategory(''); }}>
+                  Cancel
+                </button>
+                <div className="spacer" />
+                <button
+                  className="btn btn-primary"
+                  style={{ fontSize: 11 }}
+                  disabled={!newTemplateName.trim()}
+                  onClick={() => {
+                    const newTemplate: FocusTemplate = {
+                      id: crypto.randomUUID(),
+                      name: newTemplateName.trim(),
+                      icon: 'zap',
+                      defaultDuration: newTemplateDuration * 60,
+                      color: '#007AFF',
+                      category: newTemplateCategory || undefined,
+                    };
+                    const updated = [...templates, newTemplate];
+                    setTemplates(updated);
+                    window.zenstate.saveTemplates(updated);
+                    setNewTemplateName('');
+                    setNewTemplateDuration(25);
+                    setNewTemplateCategory('');
+                    setShowNewTemplate(false);
+                  }}
+                >
+                  Add Template
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             className="btn btn-secondary"
             style={{ width: '100%', fontSize: 12, marginBottom: 12 }}

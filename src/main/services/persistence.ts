@@ -19,7 +19,7 @@ const store = new Store({
     ] as FocusTemplate[],
     emergencyGrantedIds: [] as string[],
     appSettings: {
-      dailyFocusGoalSeconds: 6 * 3600, // 6 hours
+      dailyFocusGoalSeconds: 0, // disabled by default
       breakReminderEnabled: false,
       breakReminderIntervalSeconds: 90 * 60, // 90 minutes
       idleDetectionEnabled: false,
