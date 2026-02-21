@@ -35,6 +35,10 @@ declare global {
       checkForUpdate: () => Promise<void>;
       getLoginItemSettings: () => Promise<boolean>;
       setLoginItemSettings: (enabled: boolean) => void;
+      getCategories: () => Promise<string[]>;
+      saveCategories: (categories: string[]) => Promise<boolean>;
+      getCategoryColors: () => Promise<Record<string, string>>;
+      saveCategoryColors: (colors: Record<string, string>) => Promise<boolean>;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;
       removeAllListeners: (channel: string) => void;
     };

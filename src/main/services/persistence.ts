@@ -7,6 +7,7 @@ const store = new Store({
     currentUser: null as User | null,
     dailyRecords: [] as DailyRecord[],
     categories: ['Meetings', 'Research', 'Design', 'Development', 'Editing', 'Animation', 'Writing', 'Sales', 'Accounting', 'Other'],
+    categoryColors: {} as Record<string, string>,
     focusSchedules: [] as FocusSchedule[],
     focusTemplates: [
       { id: '1', name: 'Deep Work', icon: 'brain', defaultDuration: 5400, color: '#5856D6' },
@@ -47,6 +48,14 @@ export class PersistenceService {
 
   saveCategories(categories: string[]): void {
     store.set('categories', categories);
+  }
+
+  getCategoryColors(): Record<string, string> {
+    return store.get('categoryColors') as Record<string, string>;
+  }
+
+  saveCategoryColors(colors: Record<string, string>): void {
+    store.set('categoryColors', colors);
   }
 
   getSchedules(): FocusSchedule[] {

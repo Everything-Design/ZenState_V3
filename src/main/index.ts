@@ -403,6 +403,7 @@ function setupIPC() {
       persistence.saveUser(user);
       networking?.updateUser(user);
       updateTrayIcon(user, 0, timerIsRunning);
+      broadcastToWindows(IPC.PEER_UPDATED, user);
     }
   });
 
@@ -412,6 +413,7 @@ function setupIPC() {
       Object.assign(user, updates);
       persistence.saveUser(user);
       networking?.updateUser(user);
+      broadcastToWindows(IPC.PEER_UPDATED, user);
     }
   });
 
@@ -535,6 +537,14 @@ function setupIPC() {
   });
   ipcMain.handle('data:save-categories', (_e, categories: string[]) => {
     persistence.saveCategories(categories);
+    return true;
+  });
+
+  ipcMain.handle('data:get-category-colors', () => {
+    return persistence.getCategoryColors();
+  });
+  ipcMain.handle('data:save-category-colors', (_e, colors: Record<string, string>) => {
+    persistence.saveCategoryColors(colors);
     return true;
   });
 

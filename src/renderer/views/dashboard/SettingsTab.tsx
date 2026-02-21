@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { Settings, Tag, Info, Shield, Wifi } from 'lucide-react';
 import { User } from '../../../shared/types';
+import { CATEGORY_PALETTE, getCategoryColor } from '../../utils/categoryColors';
 
-const COLOR_OPTIONS = ['#007AFF', '#34C759', '#FF9500', '#FF3B30', '#5856D6', '#AF52DE', '#FF2D55', '#8E8E93'];
-const EMOJI_OPTIONS = ['😊', '😎', '🚀', '🎯', '🔥', '💡', '🎨', '🎵', '🌟', '⚡', '🦊', '🐱', '🌈', '🍀', '🎮', '🏀', '📚', '🧠', '💻', '☕'];
+// Avatar colors — no green/orange/red (reserved for status indicators)
+const COLOR_OPTIONS = ['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#00C7BE', '#5AC8FA', '#BF5AF2', '#A2845E'];
+const EMOJI_OPTIONS = [
+  // GenZ / fun
+  '😎', '🤪', '🥶', '💀', '👻', '🤡', '🫠', '🫡', '🤯', '🥳',
+  // Designers
+  '🎨', '✏️', '🖌️', '🎭', '👁️', '💅', '🪄', '✨',
+  // Developers
+  '💻', '🧑‍💻', '⌨️', '🤖', '🐛', '🔧', '🧪', '🛠️',
+  // Animators / Motion
+  '🎬', '🎞️', '🕹️', '🌀', '💫', '🔮', '🪩', '🌊',
+  // Management
+  '📊', '🧠', '🎯', '📋', '🗂️', '💼', '🏆', '📈',
+  // Misc fun
+  '🚀', '🔥', '⚡', '🦊', '🐱', '🦄', '🍀', '🎮', '☕', '🌈',
+];
 
 interface Props {
   currentUser: User;
@@ -34,6 +49,8 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
+  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
 
   // Network
   const [localInfo, setLocalInfo] = useState<{ addresses: string[]; port: number }>({ addresses: [], port: 0 });
@@ -49,9 +66,12 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     (window as any).zenstate.getAppVersion?.().then((v: string) => {
       setAppVersion(v);
     }).catch(() => {});
-    // Load categories
+    // Load categories and colors
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
       setCategories(cats || []);
+    }).catch(() => {});
+    (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
+      setCategoryColors(colors || {});
     }).catch(() => {});
     // Load network info
     (window as any).zenstate.getLocalInfo?.().then((info: { addresses: string[]; port: number }) => {
@@ -410,67 +430,95 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
         <div className="card">
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 12 }}>
-            {categories.map((cat, index) => (
-              <div
-                key={cat}
-                draggable
-                onDragStart={() => setDragIndex(index)}
-                onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
-                onDragLeave={() => { if (dragOverIndex === index) setDragOverIndex(null); }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragIndex !== null && dragIndex !== index) {
-                    const updated = [...categories];
-                    const [moved] = updated.splice(dragIndex, 1);
-                    updated.splice(index, 0, moved);
-                    setCategories(updated);
-                    (window as any).zenstate.saveCategories(updated);
-                  }
-                  setDragIndex(null);
-                  setDragOverIndex(null);
-                }}
-                onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '4px 8px',
-                  height: 32,
-                  borderRadius: 6,
-                  background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
-                  fontSize: 12,
-                  opacity: dragIndex === index ? 0.4 : 1,
-                  borderTop: dragOverIndex === index && dragIndex !== null && dragIndex > index ? '2px solid var(--zen-primary)' : '2px solid transparent',
-                  borderBottom: dragOverIndex === index && dragIndex !== null && dragIndex < index ? '2px solid var(--zen-primary)' : '2px solid transparent',
-                  transition: 'opacity 0.15s ease',
-                  cursor: 'grab',
-                }}
-              >
-                <span style={{ fontSize: 14, color: 'var(--zen-tertiary-text)', cursor: 'grab', flexShrink: 0, userSelect: 'none' }}>
-                  ⠿
-                </span>
-                <span style={{ width: 20, fontSize: 11, color: 'var(--zen-tertiary-text)', textAlign: 'right', flexShrink: 0 }}>
-                  {index + 1}
-                </span>
-                <span style={{ flex: 1, color: 'var(--zen-secondary-text)' }}>{cat}</span>
-                <button
-                  onClick={() => handleDeleteCategory(cat)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    color: 'var(--zen-tertiary-text)',
-                    fontSize: 14,
-                    padding: '0 4px',
-                    lineHeight: 1,
-                    fontFamily: 'inherit',
-                  }}
-                  title="Remove category"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
+            {categories.map((cat, index) => {
+              const catColor = getCategoryColor(cat, categoryColors, categories);
+              return (
+                <div key={cat}>
+                  <div
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
+                    onDragLeave={() => { if (dragOverIndex === index) setDragOverIndex(null); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragIndex !== null && dragIndex !== index) {
+                        const updated = [...categories];
+                        const [moved] = updated.splice(dragIndex, 1);
+                        updated.splice(index, 0, moved);
+                        setCategories(updated);
+                        (window as any).zenstate.saveCategories(updated);
+                      }
+                      setDragIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '4px 8px',
+                      height: 32,
+                      borderRadius: 6,
+                      background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
+                      fontSize: 12,
+                      opacity: dragIndex === index ? 0.4 : 1,
+                      borderTop: dragOverIndex === index && dragIndex !== null && dragIndex > index ? '2px solid var(--zen-primary)' : '2px solid transparent',
+                      borderBottom: dragOverIndex === index && dragIndex !== null && dragIndex < index ? '2px solid var(--zen-primary)' : '2px solid transparent',
+                      transition: 'opacity 0.15s ease',
+                      cursor: 'grab',
+                    }}
+                  >
+                    <span style={{ fontSize: 14, color: 'var(--zen-tertiary-text)', cursor: 'grab', flexShrink: 0, userSelect: 'none' }}>
+                      ⠿
+                    </span>
+                    <div
+                      onClick={() => setColorPickerFor(colorPickerFor === cat ? null : cat)}
+                      style={{
+                        width: 12, height: 12, borderRadius: '50%',
+                        background: catColor, cursor: 'pointer', flexShrink: 0,
+                        border: '1px solid rgba(255,255,255,0.15)',
+                      }}
+                      title="Change color"
+                    />
+                    <span style={{ flex: 1, color: catColor, fontWeight: 500 }}>{cat}</span>
+                    <button
+                      onClick={() => handleDeleteCategory(cat)}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--zen-tertiary-text)', fontSize: 14,
+                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
+                      }}
+                      title="Remove category"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  {/* Inline color picker */}
+                  {colorPickerFor === cat && (
+                    <div style={{ display: 'flex', gap: 4, padding: '6px 8px 6px 36px', flexWrap: 'wrap' }}>
+                      {CATEGORY_PALETTE.map((color) => (
+                        <div
+                          key={color}
+                          onClick={() => {
+                            const updated = { ...categoryColors, [cat]: color };
+                            setCategoryColors(updated);
+                            (window as any).zenstate.saveCategoryColors(updated);
+                            setColorPickerFor(null);
+                          }}
+                          style={{
+                            width: 18, height: 18, borderRadius: '50%', background: color, cursor: 'pointer',
+                            border: catColor === color ? '2px solid white' : '1px solid rgba(255,255,255,0.1)',
+                            transition: 'transform 0.1s ease',
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.2)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Add category */}

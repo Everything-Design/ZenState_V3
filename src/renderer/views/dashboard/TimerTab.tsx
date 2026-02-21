@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
+import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
 
 interface TimerState {
   elapsed: number;
@@ -58,10 +59,14 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
       setCategories(cats || []);
+    }).catch(() => {});
+    (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
+      setCategoryColors(colors || {});
     }).catch(() => {});
   }, []);
 
@@ -136,19 +141,23 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
             <div style={{ fontSize: 13, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>
               {timerState.taskLabel}
             </div>
-            {timerState.category && (
-              <span style={{
-                fontSize: 10,
-                padding: '2px 8px',
-                borderRadius: 10,
-                background: 'var(--zen-primary)',
-                color: 'white',
-                display: 'inline-block',
-                marginBottom: 8,
-              }}>
-                {timerState.category}
-              </span>
-            )}
+            {timerState.category && (() => {
+              const catColor = getCategoryColor(timerState.category, categoryColors, categories);
+              return (
+                <span style={{
+                  fontSize: 10,
+                  padding: '2px 8px',
+                  borderRadius: 10,
+                  background: `${catColor}22`,
+                  color: catColor,
+                  border: `1px solid ${catColor}33`,
+                  display: 'inline-block',
+                  marginBottom: 8,
+                }}>
+                  {timerState.category}
+                </span>
+              );
+            })()}
 
             <div style={{
               fontSize: 42,
@@ -355,13 +364,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                 <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {session.taskLabel}
                   {session.category && (
-                    <span style={{
-                      fontSize: 9,
-                      padding: '1px 6px',
-                      borderRadius: 8,
-                      background: 'var(--zen-secondary-bg)',
-                      color: 'var(--zen-secondary-text)',
-                    }}>
+                    <span style={categoryTagStyle(getCategoryColor(session.category, categoryColors, categories))}>
                       {session.category}
                     </span>
                   )}

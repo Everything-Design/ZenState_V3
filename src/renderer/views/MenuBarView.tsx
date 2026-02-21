@@ -453,16 +453,16 @@ export default function MenuBarView({ currentUser, peers, timerState, onStatusCh
               {timerState.targetDuration ? formatTime(timerState.remaining ?? 0) : formatTime(timerState.elapsed)}
             </div>
             {timerState.isPaused ? (
-              <button className="btn btn-primary" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => window.zenstate.resumeTimer()}>
-                ‖ Resume
+              <button className="btn btn-primary" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => window.zenstate.resumeTimer()}>
+                Resume
               </button>
             ) : (
-              <button className="btn btn-secondary" style={{ fontSize: 10, padding: '3px 8px', background: 'rgba(255,149,0,0.15)', color: 'var(--status-occupied)', border: '1px solid rgba(255,149,0,0.3)', flexShrink: 0 }} onClick={() => window.zenstate.pauseTimer()}>
-                ‖ Pause
+              <button className="btn btn-secondary" style={{ fontSize: 10, padding: '2px 6px', background: 'rgba(255,149,0,0.15)', color: 'var(--status-occupied)', border: '1px solid rgba(255,149,0,0.3)', flexShrink: 0 }} onClick={() => window.zenstate.pauseTimer()}>
+                Pause
               </button>
             )}
-            <button className="btn btn-danger" style={{ fontSize: 10, padding: '3px 8px', flexShrink: 0 }} onClick={() => window.zenstate.stopTimer()}>
-              ■ Stop
+            <button className="btn btn-danger" style={{ fontSize: 10, padding: '2px 6px', flexShrink: 0 }} onClick={() => window.zenstate.stopTimer()}>
+              Stop
             </button>
           </div>
           {/* Progress bar for countdown in menu bar */}

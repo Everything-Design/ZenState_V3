@@ -57,6 +57,8 @@ export default function App() {
 
     window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
       const p = peer as User;
+      // Update own user if it's us (e.g. status changed from another window)
+      setCurrentUser((prev) => prev && prev.id === p.id ? p : prev);
       setPeers((prev) => {
         const idx = prev.findIndex((x) => x.id === p.id);
         if (idx >= 0) {

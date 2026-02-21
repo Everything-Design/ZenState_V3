@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
+import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
 
 interface Props {
   records: DailyRecord[];
@@ -53,16 +54,7 @@ function formatDateLabel(dateStr: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
-const CATEGORY_COLORS: Record<string, string> = {
-  Development: '#007AFF',
-  Design: '#FF9500',
-  Meetings: '#FF3B30',
-  Writing: '#34C759',
-  Research: '#5856D6',
-  Planning: '#AF52DE',
-  Admin: '#8E8E93',
-  Other: '#AEAEB2',
-};
+// Category colors are now loaded from persistence via getCategoryColor()
 
 export default function TimesheetTab({ records, onRefreshRecords }: Props) {
   const [statPeriod, setStatPeriod] = useState<StatPeriod>('today');
@@ -72,10 +64,14 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
       setCategories(cats || []);
+    }).catch(() => {});
+    (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
+      setCategoryColors(colors || {});
     }).catch(() => {});
   }, []);
 
@@ -273,7 +269,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                   <div style={{
                     height: '100%',
                     width: `${cat.percentage}%`,
-                    background: CATEGORY_COLORS[cat.name] || 'var(--zen-primary)',
+                    background: getCategoryColor(cat.name, categoryColors, categories),
                     borderRadius: 3,
                     transition: 'width 0.3s ease',
                   }} />
@@ -318,7 +314,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                   width: 6,
                   height: 6,
                   borderRadius: '50%',
-                  background: CATEGORY_COLORS[cat.name] || 'var(--zen-primary)',
+                  background: getCategoryColor(cat.name, categoryColors, categories),
                 }} />
                 <span style={{ color: 'var(--zen-secondary-text)' }}>{cat.name}</span>
                 <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--zen-tertiary-text)' }}>
@@ -340,15 +336,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                 <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {session.taskLabel}
                   {session.category && (
-                    <span style={{
-                      fontSize: 9,
-                      padding: '1px 6px',
-                      borderRadius: 8,
-                      background: CATEGORY_COLORS[session.category]
-                        ? `${CATEGORY_COLORS[session.category]}22`
-                        : 'var(--zen-secondary-bg)',
-                      color: CATEGORY_COLORS[session.category] || 'var(--zen-secondary-text)',
-                    }}>
+                    <span style={categoryTagStyle(getCategoryColor(session.category, categoryColors, categories))}>
                       {session.category}
                     </span>
                   )}
@@ -536,13 +524,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                     <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                       {session.taskLabel}
                       {session.category && (
-                        <span style={{
-                          fontSize: 9,
-                          padding: '1px 6px',
-                          borderRadius: 8,
-                          background: 'var(--zen-secondary-bg)',
-                          color: 'var(--zen-secondary-text)',
-                        }}>
+                        <span style={categoryTagStyle(getCategoryColor(session.category, categoryColors, categories))}>
                           {session.category}
                         </span>
                       )}

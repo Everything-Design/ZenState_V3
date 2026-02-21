@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('zenstate', {
   resetAllData: () => ipcRenderer.invoke('data:reset-all'),
   getCategories: () => ipcRenderer.invoke('data:get-categories'),
   saveCategories: (categories: string[]) => ipcRenderer.invoke('data:save-categories', categories),
+  getCategoryColors: () => ipcRenderer.invoke('data:get-category-colors'),
+  saveCategoryColors: (colors: Record<string, string>) => ipcRenderer.invoke('data:save-category-colors', colors),
   pickAvatarImage: () => ipcRenderer.invoke('dialog:pick-avatar-image'),
   connectToIP: (host: string, port: number) => ipcRenderer.invoke('network:connect-ip', { host, port }),
   getLocalInfo: () => ipcRenderer.invoke('network:get-local-info'),
