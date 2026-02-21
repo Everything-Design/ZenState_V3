@@ -325,7 +325,14 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
               </button>
             </div>
             {avatarMode === 'emoji' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 4 }}>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(10, 1fr)',
+                gap: 6,
+                maxHeight: 3 * 32 + 2 * 6,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+              }}>
                 {EMOJI_OPTIONS.map((emoji) => (
                   <button
                     key={emoji}
@@ -353,7 +360,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           {/* Color Picker */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Avatar Color</div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {COLOR_OPTIONS.map((color) => (
                 <button
                   key={color}
@@ -369,6 +376,42 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
                   }}
                 />
               ))}
+              {/* Custom color picker */}
+              <label
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  background: !COLOR_OPTIONS.includes(currentUser.avatarColor || '#007AFF')
+                    ? currentUser.avatarColor
+                    : 'conic-gradient(red, yellow, lime, aqua, blue, magenta, red)',
+                  border: !COLOR_OPTIONS.includes(currentUser.avatarColor || '#007AFF')
+                    ? '2px solid white'
+                    : '2px solid transparent',
+                  boxShadow: !COLOR_OPTIONS.includes(currentUser.avatarColor || '#007AFF')
+                    ? '0 0 0 1px var(--zen-primary)'
+                    : 'none',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                title="Custom color"
+              >
+                <input
+                  type="color"
+                  value={currentUser.avatarColor || '#007AFF'}
+                  onChange={(e) => onUserUpdate({ avatarColor: e.target.value })}
+                  style={{
+                    position: 'absolute',
+                    width: 0,
+                    height: 0,
+                    opacity: 0,
+                    overflow: 'hidden',
+                  }}
+                />
+              </label>
             </div>
           </div>
 
