@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Tag, Info, Shield, Wifi } from 'lucide-react';
-import { User, AppSettings } from '../../../shared/types';
+import { Settings, Tag, Info, Shield, Wifi, Clock } from 'lucide-react';
+import { User, AppSettings, FocusTemplate } from '../../../shared/types';
 import { CATEGORY_PALETTE, getCategoryColor } from '../../utils/categoryColors';
 
 // Avatar colors — no green/orange/red (reserved for status indicators)
@@ -27,7 +27,7 @@ interface Props {
   onSignOut: () => void;
 }
 
-type SettingsSection = 'general' | 'categories' | 'network' | 'about' | 'admin';
+type SettingsSection = 'general' | 'categories' | 'templates' | 'network' | 'about' | 'admin';
 
 export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOut }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
@@ -71,6 +71,12 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [selectedPeerIds, setSelectedPeerIds] = useState<Set<string>>(new Set());
   const [notifSent, setNotifSent] = useState(false);
 
+  // Timer templates
+  const [templates, setTemplates] = useState<FocusTemplate[]>([]);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateDuration, setNewTemplateDuration] = useState(25);
+  const [newTemplateCategory, setNewTemplateCategory] = useState('');
+
   const isAdmin = currentUser.isAdmin === true;
 
   useEffect(() => {
@@ -94,6 +100,10 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
     // Load app settings
     (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
       if (s) setAppSettings(s);
+    }).catch(() => {});
+    // Load templates
+    (window as any).zenstate.getTemplates?.().then((t: FocusTemplate[]) => {
+      setTemplates(t || []);
     }).catch(() => {});
 
     // Listen for auto-update download completion
@@ -255,6 +265,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const sections: { id: SettingsSection; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: <Settings size={16} /> },
     { id: 'categories', label: 'Categories', icon: <Tag size={16} /> },
+    { id: 'templates', label: 'Templates', icon: <Clock size={16} /> },
     { id: 'network', label: 'Network', icon: <Wifi size={16} /> },
     { id: 'about', label: 'About', icon: <Info size={16} /> },
     { id: 'admin', label: 'Admin', icon: <Shield size={16} />, adminOnly: true },
@@ -781,6 +792,154 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           <div style={{ marginTop: 12, fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
             Drag ⠿ to reorder. Categories organize your focus sessions and time tracking.
           </div>
+        </div>
+      )}
+
+      {/* Timer Templates Section */}
+      {activeSection === 'templates' && (
+        <div className="card">
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Timer Templates</div>
+          <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 16 }}>
+            Quick-start templates appear on the Timer tab and menu popup. Click to instantly start a timer.
+          </div>
+
+          {/* Existing templates */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 16 }}>
+            {templates.map((t, index) => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 8px',
+                  height: 36,
+                  borderRadius: 6,
+                  background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
+                  fontSize: 12,
+                }}
+              >
+                <span style={{ fontWeight: 500, flex: 1 }}>{t.name}</span>
+                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', fontFamily: 'var(--font-mono)' }}>
+                  {Math.round(t.defaultDuration / 60)}m
+                </span>
+                {t.category && (
+                  <span style={{
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    borderRadius: 8,
+                    background: 'var(--zen-secondary-bg)',
+                    color: 'var(--zen-secondary-text)',
+                    border: '1px solid var(--zen-divider)',
+                  }}>
+                    {t.category}
+                  </span>
+                )}
+                <button
+                  onClick={() => {
+                    const updated = templates.filter((x) => x.id !== t.id);
+                    setTemplates(updated);
+                    (window as any).zenstate.saveTemplates(updated);
+                  }}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--zen-tertiary-text)', fontSize: 14,
+                    padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
+                  }}
+                  title="Remove template"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {templates.length === 0 && (
+              <div style={{ textAlign: 'center', padding: 16, color: 'var(--zen-tertiary-text)', fontSize: 12 }}>
+                No templates yet. Add one below.
+              </div>
+            )}
+          </div>
+
+          <div className="divider" />
+
+          {/* Add new template */}
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>Add Template</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <input
+              className="text-input"
+              placeholder="Template name"
+              value={newTemplateName}
+              onChange={(e) => setNewTemplateName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newTemplateName.trim()) {
+                  const newTemplate: FocusTemplate = {
+                    id: crypto.randomUUID(),
+                    name: newTemplateName.trim(),
+                    icon: 'zap',
+                    defaultDuration: newTemplateDuration * 60,
+                    color: '#007AFF',
+                    category: newTemplateCategory || undefined,
+                  };
+                  const updated = [...templates, newTemplate];
+                  setTemplates(updated);
+                  (window as any).zenstate.saveTemplates(updated);
+                  setNewTemplateName('');
+                  setNewTemplateDuration(25);
+                  setNewTemplateCategory('');
+                }
+              }}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            <input
+              className="text-input"
+              type="number"
+              min="1"
+              placeholder="Min"
+              value={newTemplateDuration}
+              onChange={(e) => setNewTemplateDuration(parseInt(e.target.value) || 25)}
+              style={{ width: 60, fontSize: 12, textAlign: 'center' }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
+          </div>
+          {categories.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category (optional)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    className={`category-chip ${newTemplateCategory === cat ? 'selected' : ''}`}
+                    onClick={() => setNewTemplateCategory(newTemplateCategory === cat ? '' : cat)}
+                    style={{ fontSize: 10 }}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%', fontSize: 12 }}
+            disabled={!newTemplateName.trim()}
+            onClick={() => {
+              const newTemplate: FocusTemplate = {
+                id: crypto.randomUUID(),
+                name: newTemplateName.trim(),
+                icon: 'zap',
+                defaultDuration: newTemplateDuration * 60,
+                color: '#007AFF',
+                category: newTemplateCategory || undefined,
+              };
+              const updated = [...templates, newTemplate];
+              setTemplates(updated);
+              (window as any).zenstate.saveTemplates(updated);
+              setNewTemplateName('');
+              setNewTemplateDuration(25);
+              setNewTemplateCategory('');
+            }}
+          >
+            + Add Template
+          </button>
         </div>
       )}
 

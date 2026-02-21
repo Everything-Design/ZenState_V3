@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Settings, Timer, LayoutDashboard } from 'lucide-react';
+import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass } from 'lucide-react';
 import { User, AvailabilityStatus, IPC, FocusTemplate, AppSettings, DailyRecord } from '../../shared/types';
 
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
@@ -167,9 +167,9 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   ];
 
   function handleStartTimer() {
-    if (!timerTaskInput.trim()) return;
+    const label = timerTaskInput.trim() || timerCategory || 'Untitled';
     const target = timerMode === 'countdown' ? selectedDuration : undefined;
-    window.zenstate.startTimer(timerTaskInput.trim(), timerCategory || undefined, target);
+    window.zenstate.startTimer(label, timerCategory || undefined, target);
     setTimerTaskInput('');
     setTimerCategory('');
     setCustomMinutes('');
@@ -310,14 +310,67 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
 
           <input
             className="text-input"
-            placeholder="What are you working on?"
+            placeholder="Task name (optional)"
             value={timerTaskInput}
             onChange={(e) => setTimerTaskInput(e.target.value)}
             autoFocus
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && timerTaskInput.trim()) handleStartTimer();
+              if (e.key === 'Enter') handleStartTimer();
             }}
           />
+
+          {/* Focus Templates */}
+          {templates.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Templates</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
+                      setShowTimerInput(false);
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '3px 10px',
+                      borderRadius: 14,
+                      background: 'var(--zen-secondary-bg)',
+                      border: '1px solid var(--zen-divider)',
+                      cursor: 'pointer',
+                      fontSize: 10,
+                      color: 'var(--zen-text)',
+                      fontFamily: 'inherit',
+                      transition: 'background 0.15s ease, border-color 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
+                  >
+                    <span style={{ fontWeight: 500 }}>{t.name}</span>
+                    <span style={{ color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Category Picker */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category</div>
+            <div className="category-picker">
+              {categories.map((cat) => (
+                <button
+                  key={cat}
+                  className={`category-chip ${timerCategory === cat ? 'selected' : ''}`}
+                  onClick={() => setTimerCategory(timerCategory === cat ? '' : cat)}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Mode Toggle */}
           <div style={{ display: 'flex', gap: 4, background: 'var(--zen-tertiary-bg)', borderRadius: 6, padding: 2 }}>
@@ -330,7 +383,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
               }}
               onClick={() => setTimerMode('stopwatch')}
             >
-              ⏱ Stopwatch
+              Stopwatch
             </button>
             <button
               style={{
@@ -341,7 +394,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
               }}
               onClick={() => setTimerMode('countdown')}
             >
-              ⏳ Countdown
+              <Hourglass size={10} style={{ marginRight: 2, verticalAlign: 'middle' }} /> Countdown
             </button>
           </div>
 
@@ -378,22 +431,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             </div>
           )}
 
-          {/* Category Picker */}
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category</div>
-            <div className="category-picker">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  className={`category-chip ${timerCategory === cat ? 'selected' : ''}`}
-                  onClick={() => setTimerCategory(timerCategory === cat ? '' : cat)}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="hstack" style={{ gap: 8 }}>
             <button
               className="btn btn-secondary"
@@ -404,10 +441,9 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             <div className="spacer" />
             <button
               className="btn btn-primary"
-              disabled={!timerTaskInput.trim()}
               onClick={handleStartTimer}
             >
-              {timerMode === 'countdown' ? `⏳ ${formatDuration(selectedDuration)}` : 'Start'}
+              {timerMode === 'countdown' ? `Start ${formatDuration(selectedDuration)}` : 'Start'}
             </button>
           </div>
         </div>
@@ -453,7 +489,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         onClick={() => setShowStatusMessage(true)}
       >
         {currentUser.activeStatusMessage ? (
-          <span>💬 {currentUser.activeStatusMessage}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MessageCircle size={12} /> {currentUser.activeStatusMessage}</span>
         ) : (
           <span style={{ color: 'var(--zen-tertiary-text)' }}>+ Set a status message...</span>
         )}
@@ -534,8 +570,8 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
       {isTimerActive && (
         <div className="timer-display" style={{ margin: '6px 16px', padding: '6px 12px' }}>
           <div className="hstack" style={{ gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {timerState.targetDuration ? '⏳' : '⏱'} {timerState.taskLabel}
+            <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {timerState.targetDuration ? <Hourglass size={11} /> : <Timer size={11} />} {timerState.taskLabel}
             </span>
             <div className={`timer-time ${timerState.isPaused ? 'paused' : ''}`} style={{ fontSize: 14, flexShrink: 0 }}>
               {timerState.targetDuration ? formatTime(timerState.remaining ?? 0) : formatTime(timerState.elapsed)}
@@ -564,39 +600,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
               }} />
             </div>
           )}
-        </div>
-      )}
-
-      {/* Focus Templates (when timer not active) */}
-      {!isTimerActive && templates.length > 0 && (
-        <div style={{ padding: '4px 16px 2px', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {templates.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => {
-                window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '3px 10px',
-                borderRadius: 14,
-                background: 'var(--zen-secondary-bg)',
-                border: '1px solid var(--zen-divider)',
-                cursor: 'pointer',
-                fontSize: 10,
-                color: 'var(--zen-text)',
-                fontFamily: 'inherit',
-                transition: 'background 0.15s ease, border-color 0.15s ease',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
-            >
-              <span style={{ fontWeight: 500 }}>{t.name}</span>
-              <span style={{ color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
-            </button>
-          ))}
         </div>
       )}
 
@@ -686,7 +689,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                   <div className="member-name">{peer.name}</div>
                   {peer.activeStatusMessage ? (
                     <div className="member-message">
-                      💬 {peer.activeStatusMessage}
+                      <MessageCircle size={10} /> {peer.activeStatusMessage}
                     </div>
                   ) : (
                     <div className="member-status-text" style={{ color: getStatusColor(peer.status) }}>

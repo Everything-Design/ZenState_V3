@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Timer, ClipboardList, Settings } from 'lucide-react';
+import { Users, Timer, ClipboardList, Settings, MessageCircle } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimerTab from './dashboard/TimerTab';
@@ -165,7 +165,7 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             }}
           >
             {currentUser.activeStatusMessage ? (
-              <span>💬 {currentUser.activeStatusMessage}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MessageCircle size={12} /> {currentUser.activeStatusMessage}</span>
             ) : (
               <span style={{ color: 'var(--zen-tertiary-text)' }}>+ Set a status message...</span>
             )}

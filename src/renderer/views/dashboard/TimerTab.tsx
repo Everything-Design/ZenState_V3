@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { Pencil, Trash2, Hourglass, FileText } from 'lucide-react';
 import { DailyRecord, DailySession, FocusTemplate, AppSettings } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
@@ -63,10 +64,6 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<FocusTemplate[]>([]);
   const [dailyGoalSeconds, setDailyGoalSeconds] = useState(0);
-  const [showNewTemplate, setShowNewTemplate] = useState(false);
-  const [newTemplateName, setNewTemplateName] = useState('');
-  const [newTemplateDuration, setNewTemplateDuration] = useState(25);
-  const [newTemplateCategory, setNewTemplateCategory] = useState('');
 
   useEffect(() => {
     (window as any).zenstate.getCategories?.().then((cats: string[]) => {
@@ -100,9 +97,9 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const goalComplete = dailyGoalSeconds > 0 && todayTotal >= dailyGoalSeconds;
 
   function handleStartTimer() {
-    if (!taskInput.trim()) return;
+    const label = taskInput.trim() || selectedCategory || 'Untitled';
     const target = timerMode === 'countdown' ? selectedDuration : undefined;
-    window.zenstate.startTimer(taskInput.trim(), selectedCategory || undefined, target);
+    window.zenstate.startTimer(label, selectedCategory || undefined, target);
     setTaskInput('');
     setSelectedCategory('');
     setCustomMinutes('');
@@ -229,7 +226,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
           <div className="card-title">Start Recording</div>
           <input
             className="text-input"
-            placeholder="What are you working on?"
+            placeholder="Task name (optional)"
             value={taskInput}
             onChange={(e) => setTaskInput(e.target.value)}
             autoFocus
@@ -258,7 +255,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                 }}
                 onClick={() => setTimerMode('stopwatch')}
               >
-                ⏱ Stopwatch
+                Stopwatch
               </button>
               <button
                 style={{
@@ -273,10 +270,14 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                   background: timerMode === 'countdown' ? 'var(--zen-primary)' : 'transparent',
                   color: timerMode === 'countdown' ? 'white' : 'var(--zen-secondary-text)',
                   transition: 'all 0.15s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
                 }}
                 onClick={() => setTimerMode('countdown')}
               >
-                ⏳ Countdown
+                <Hourglass size={12} /> Countdown
               </button>
             </div>
           </div>
@@ -335,8 +336,8 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
               Cancel
             </button>
             <div className="spacer" />
-            <button className="btn btn-primary" disabled={!taskInput.trim()} onClick={handleStartTimer}>
-              {timerMode === 'countdown' ? `⏳ Start ${formatDuration(selectedDuration)}` : '● Start Recording'}
+            <button className="btn btn-primary" onClick={handleStartTimer}>
+              {timerMode === 'countdown' ? `Start ${formatDuration(selectedDuration)}` : 'Start Recording'}
             </button>
           </div>
         </div>
@@ -345,143 +346,35 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
       {/* Focus Templates (idle state) */}
       {!isTimerActive && !showInput && (
         <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-            {templates.map((t) => (
-              <div
-                key={t.id}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '6px 14px',
-                  borderRadius: 20,
-                  background: 'var(--zen-secondary-bg)',
-                  border: '1px solid var(--zen-divider)',
-                  cursor: 'pointer',
-                  fontSize: 12,
-                  transition: 'background 0.15s ease, border-color 0.15s ease',
-                  position: 'relative',
-                }}
-                onClick={() => {
-                  window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
-              >
-                <span style={{ fontWeight: 500 }}>{t.name}</span>
-                <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
+          {templates.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {templates.map((t) => (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    const updated = templates.filter((x) => x.id !== t.id);
-                    setTemplates(updated);
-                    window.zenstate.saveTemplates(updated);
-                  }}
+                  key={t.id}
                   style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--zen-tertiary-text)', fontSize: 12, padding: '0 0 0 2px',
-                    lineHeight: 1, fontFamily: 'inherit',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '6px 14px',
+                    borderRadius: 20,
+                    background: 'var(--zen-secondary-bg)',
+                    border: '1px solid var(--zen-divider)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    transition: 'background 0.15s ease, border-color 0.15s ease',
+                    fontFamily: 'inherit',
+                    color: 'var(--zen-text)',
                   }}
-                  title="Delete template"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => setShowNewTemplate(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: '6px 14px',
-                borderRadius: 20,
-                background: 'transparent',
-                border: '1px dashed var(--zen-divider)',
-                cursor: 'pointer',
-                fontSize: 12,
-                color: 'var(--zen-tertiary-text)',
-                transition: 'border-color 0.15s ease, color 0.15s ease',
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--zen-primary)'; e.currentTarget.style.color = 'var(--zen-primary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--zen-divider)'; e.currentTarget.style.color = 'var(--zen-tertiary-text)'; }}
-            >
-              + Template
-            </button>
-          </div>
-
-          {/* New template form */}
-          {showNewTemplate && (
-            <div className="card fade-in" style={{ marginBottom: 12, padding: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>New Template</div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <input
-                  className="text-input"
-                  placeholder="Template name"
-                  value={newTemplateName}
-                  onChange={(e) => setNewTemplateName(e.target.value)}
-                  autoFocus
-                  style={{ flex: 1, fontSize: 12 }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setShowNewTemplate(false);
-                  }}
-                />
-                <input
-                  className="text-input"
-                  type="number"
-                  min="1"
-                  placeholder="Min"
-                  value={newTemplateDuration}
-                  onChange={(e) => setNewTemplateDuration(parseInt(e.target.value) || 25)}
-                  style={{ width: 60, fontSize: 12, textAlign: 'center' }}
-                />
-                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
-              </div>
-              {categories.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      className={`category-chip ${newTemplateCategory === cat ? 'selected' : ''}`}
-                      onClick={() => setNewTemplateCategory(newTemplateCategory === cat ? '' : cat)}
-                      style={{ fontSize: 10 }}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => { setShowNewTemplate(false); setNewTemplateName(''); setNewTemplateCategory(''); }}>
-                  Cancel
-                </button>
-                <div className="spacer" />
-                <button
-                  className="btn btn-primary"
-                  style={{ fontSize: 11 }}
-                  disabled={!newTemplateName.trim()}
                   onClick={() => {
-                    const newTemplate: FocusTemplate = {
-                      id: crypto.randomUUID(),
-                      name: newTemplateName.trim(),
-                      icon: 'zap',
-                      defaultDuration: newTemplateDuration * 60,
-                      color: '#007AFF',
-                      category: newTemplateCategory || undefined,
-                    };
-                    const updated = [...templates, newTemplate];
-                    setTemplates(updated);
-                    window.zenstate.saveTemplates(updated);
-                    setNewTemplateName('');
-                    setNewTemplateDuration(25);
-                    setNewTemplateCategory('');
-                    setShowNewTemplate(false);
+                    window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
                   }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
                 >
-                  Add Template
+                  <span style={{ fontWeight: 500 }}>{t.name}</span>
+                  <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
                 </button>
-              </div>
+              ))}
             </div>
           )}
 
@@ -569,7 +462,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
               }}>
                 {formatDuration(session.duration)}
                 {session.notes && (
-                  <span title={session.notes} style={{ cursor: 'default', fontSize: 11 }}>📝</span>
+                  <span title={session.notes} style={{ cursor: 'default', display: 'flex', alignItems: 'center' }}><FileText size={12} /></span>
                 )}
               </div>
               <div className="session-actions">
@@ -578,7 +471,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                   onClick={() => setEditingSession({ session, date: getTodayDateStr() })}
                   title="Edit"
                 >
-                  ✏️
+                  <Pencil size={13} />
                 </button>
                 {deleteConfirm === session.id ? (
                   <button
@@ -594,7 +487,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
                     onClick={() => setDeleteConfirm(session.id)}
                     title="Delete"
                   >
-                    🗑
+                    <Trash2 size={13} />
                   </button>
                 )}
               </div>
