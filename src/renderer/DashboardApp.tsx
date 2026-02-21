@@ -20,7 +20,7 @@ declare global {
       stopTimer: () => void;
       pauseTimer: () => void;
       resumeTimer: () => void;
-      openDashboard: () => void;
+      openDashboard: (tab?: string) => void;
       closePopover: () => void;
       quit: () => void;
       login: (user: User) => void;
@@ -74,6 +74,7 @@ export default function DashboardApp() {
   const [records, setRecords] = useState<DailyRecord[]>([]);
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
+  const [requestedTab, setRequestedTab] = useState<string | undefined>(undefined);
   const prevTimerRunning = useRef(false);
 
   useEffect(() => {
@@ -146,6 +147,11 @@ export default function DashboardApp() {
       setUpdateAvailable(info.version);
     });
 
+    // Listen for tab switch requests from main process
+    window.zenstate.on('dashboard:switch-tab', (tab: unknown) => {
+      setRequestedTab(tab as string);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
@@ -154,6 +160,7 @@ export default function DashboardApp() {
       window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
       window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
+      window.zenstate.removeAllListeners('dashboard:switch-tab');
     };
   }, [currentUser]);
 
@@ -262,6 +269,8 @@ export default function DashboardApp() {
         timerState={timerState}
         records={records}
         statusRevertRemaining={statusRevertRemaining}
+        requestedTab={requestedTab}
+        onRequestedTabHandled={() => setRequestedTab(undefined)}
         onRefreshRecords={refreshRecords}
         onStatusChange={handleStatusChange}
         onUserUpdate={handleUserUpdate}

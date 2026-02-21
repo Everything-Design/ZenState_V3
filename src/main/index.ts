@@ -621,7 +621,7 @@ function setupIPC() {
   });
 
   // Window management
-  ipcMain.on(IPC.OPEN_DASHBOARD, () => {
+  ipcMain.on(IPC.OPEN_DASHBOARD, (_e, tab?: string) => {
     if (!dashboardWindow || dashboardWindow.isDestroyed()) {
       dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
       if (process.platform === 'darwin') app.dock?.show();
@@ -631,8 +631,16 @@ function setupIPC() {
           app.dock?.hide();
         }
       });
+      if (tab) {
+        dashboardWindow.webContents.once('did-finish-load', () => {
+          dashboardWindow?.webContents.send('dashboard:switch-tab', tab);
+        });
+      }
     } else {
       dashboardWindow.focus();
+      if (tab) {
+        dashboardWindow.webContents.send('dashboard:switch-tab', tab);
+      }
     }
   });
 
@@ -711,6 +719,8 @@ function setupIPC() {
   ipcMain.handle(IPC.GET_SETTINGS, () => persistence.getSettings());
   ipcMain.handle(IPC.SAVE_SETTINGS, (_e, settings: AppSettings) => {
     persistence.saveSettings(settings);
+    // Broadcast settings change to all windows so popup can update
+    broadcastToWindows('settings:updated', settings);
     return true;
   });
 

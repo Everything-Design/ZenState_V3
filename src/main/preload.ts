@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   pauseTimer: () => ipcRenderer.send(IPC.PAUSE_TIMER),
   resumeTimer: () => ipcRenderer.send(IPC.RESUME_TIMER),
 
-  openDashboard: () => ipcRenderer.send(IPC.OPEN_DASHBOARD),
+  openDashboard: (tab?: string) => ipcRenderer.send(IPC.OPEN_DASHBOARD, tab),
   closePopover: () => ipcRenderer.send(IPC.CLOSE_POPOVER),
   quit: () => ipcRenderer.send(IPC.QUIT_APP),
   login: (user: unknown) => ipcRenderer.send('user:login', user),
@@ -116,6 +116,8 @@ contextBridge.exposeInMainWorld('zenstate', {
       'alert-data',
       'update:available',
       'update:downloaded',
+      'dashboard:switch-tab',
+      'settings:updated',
     ];
     if (validChannels.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));

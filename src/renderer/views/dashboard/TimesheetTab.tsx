@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { Pencil, Trash2, FileText } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
@@ -357,7 +358,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
               }}>
                 {formatDuration(session.duration)}
                 {session.notes && (
-                  <span title={session.notes} style={{ cursor: 'default', fontSize: 11 }}>📝</span>
+                  <span title={session.notes} style={{ cursor: 'default', display: 'flex', alignItems: 'center' }}><FileText size={12} /></span>
                 )}
               </div>
               <div className="session-actions">
@@ -366,7 +367,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                   onClick={() => setEditingSession({ session, date: getTodayDateStr() })}
                   title="Edit"
                 >
-                  ✏️
+                  <Pencil size={13} />
                 </button>
                 {deleteConfirm === session.id ? (
                   <button
@@ -382,7 +383,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                     onClick={() => setDeleteConfirm(session.id)}
                     title="Delete"
                   >
-                    🗑
+                    <Trash2 size={13} />
                   </button>
                 )}
               </div>
@@ -544,7 +545,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                   }}>
                     {formatDuration(session.duration)}
                     {session.notes && (
-                      <span title={session.notes} style={{ cursor: 'default', fontSize: 11 }}>📝</span>
+                      <span title={session.notes} style={{ cursor: 'default', display: 'flex', alignItems: 'center' }}><FileText size={12} /></span>
                     )}
                   </div>
                   <div className="session-actions">
@@ -553,7 +554,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                       onClick={() => setEditingSession({ session, date: selectedDate })}
                       title="Edit"
                     >
-                      ✏️
+                      <Pencil size={13} />
                     </button>
                     {deleteConfirm === session.id ? (
                       <button
@@ -569,7 +570,7 @@ export default function TimesheetTab({ records, onRefreshRecords }: Props) {
                         onClick={() => setDeleteConfirm(session.id)}
                         title="Delete"
                       >
-                        🗑
+                        <Trash2 size={13} />
                       </button>
                     )}
                   </div>

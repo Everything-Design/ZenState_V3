@@ -97,9 +97,10 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
   const goalComplete = dailyGoalSeconds > 0 && todayTotal >= dailyGoalSeconds;
 
   function handleStartTimer() {
-    const label = taskInput.trim() || selectedCategory || 'Untitled';
+    if (!selectedCategory) return;
+    const label = taskInput.trim() || selectedCategory;
     const target = timerMode === 'countdown' ? selectedDuration : undefined;
-    window.zenstate.startTimer(label, selectedCategory || undefined, target);
+    window.zenstate.startTimer(label, selectedCategory, target);
     setTaskInput('');
     setSelectedCategory('');
     setCustomMinutes('');
@@ -336,7 +337,7 @@ export default function TimerTab({ timerState, records, onRefreshRecords }: Prop
               Cancel
             </button>
             <div className="spacer" />
-            <button className="btn btn-primary" onClick={handleStartTimer}>
+            <button className="btn btn-primary" onClick={handleStartTimer} disabled={!selectedCategory}>
               {timerMode === 'countdown' ? `Start ${formatDuration(selectedDuration)}` : 'Start Recording'}
             </button>
           </div>

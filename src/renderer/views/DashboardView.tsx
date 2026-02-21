@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Timer, ClipboardList, Settings, MessageCircle } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
@@ -20,6 +20,8 @@ interface Props {
   timerState: TimerState;
   records: DailyRecord[];
   statusRevertRemaining?: number;
+  requestedTab?: string;
+  onRequestedTabHandled?: () => void;
   onRefreshRecords: () => void;
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
@@ -61,8 +63,15 @@ function formatRevertTime(seconds: number): string {
   return `${s}s`;
 }
 
-export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
+export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, requestedTab, onRequestedTabHandled, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('team');
+
+  useEffect(() => {
+    if (requestedTab && ['team', 'timer', 'timesheet', 'settings'].includes(requestedTab)) {
+      setActiveTab(requestedTab as Tab);
+      onRequestedTabHandled?.();
+    }
+  }, [requestedTab]);
   const [editingStatus, setEditingStatus] = useState(false);
   const [statusInput, setStatusInput] = useState('');
   const [showRevertPicker, setShowRevertPicker] = useState<AvailabilityStatus | null>(null);

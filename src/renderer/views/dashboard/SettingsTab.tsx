@@ -76,6 +76,10 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
   const [newTemplateName, setNewTemplateName] = useState('');
   const [newTemplateDuration, setNewTemplateDuration] = useState(25);
   const [newTemplateCategory, setNewTemplateCategory] = useState('');
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editTemplateName, setEditTemplateName] = useState('');
+  const [editTemplateDuration, setEditTemplateDuration] = useState(25);
+  const [editTemplateCategory, setEditTemplateCategory] = useState('');
 
   const isAdmin = currentUser.isAdmin === true;
 
@@ -374,7 +378,8 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(10, 1fr)',
-                gap: 6,
+                columnGap: 6,
+                rowGap: 6,
                 maxHeight: 3 * 32 + 2 * 6,
                 overflowY: 'auto',
                 overflowX: 'hidden',
@@ -806,50 +811,140 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           {/* Existing templates */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 16 }}>
             {templates.map((t, index) => (
-              <div
-                key={t.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 8px',
-                  height: 36,
-                  borderRadius: 6,
-                  background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
-                  fontSize: 12,
-                }}
-              >
-                <span style={{ fontWeight: 500, flex: 1 }}>{t.name}</span>
-                <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', fontFamily: 'var(--font-mono)' }}>
-                  {Math.round(t.defaultDuration / 60)}m
-                </span>
-                {t.category && (
-                  <span style={{
-                    fontSize: 10,
-                    padding: '1px 6px',
-                    borderRadius: 8,
-                    background: 'var(--zen-secondary-bg)',
-                    color: 'var(--zen-secondary-text)',
-                    border: '1px solid var(--zen-divider)',
+              <div key={t.id}>
+                {editingTemplateId === t.id ? (
+                  <div style={{
+                    padding: '8px',
+                    borderRadius: 6,
+                    background: 'var(--zen-tertiary-bg)',
+                    marginBottom: 4,
                   }}>
-                    {t.category}
-                  </span>
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                      <input
+                        className="text-input"
+                        placeholder="Template name"
+                        value={editTemplateName}
+                        onChange={(e) => setEditTemplateName(e.target.value)}
+                        autoFocus
+                        style={{ flex: 1, fontSize: 12 }}
+                      />
+                      <input
+                        className="text-input"
+                        type="number"
+                        min="1"
+                        value={editTemplateDuration}
+                        onChange={(e) => setEditTemplateDuration(parseInt(e.target.value) || 25)}
+                        style={{ width: 60, fontSize: 12, textAlign: 'center' }}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
+                    </div>
+                    {categories.length > 0 && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category *</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {categories.map((cat) => (
+                            <button
+                              key={cat}
+                              className={`category-chip ${editTemplateCategory === cat ? 'selected' : ''}`}
+                              onClick={() => setEditTemplateCategory(cat)}
+                              style={{ fontSize: 10 }}
+                            >
+                              {cat}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="btn btn-secondary"
+                        style={{ fontSize: 10 }}
+                        onClick={() => setEditingTemplateId(null)}
+                      >
+                        Cancel
+                      </button>
+                      <div className="spacer" />
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: 10 }}
+                        disabled={!editTemplateName.trim() || !editTemplateCategory}
+                        onClick={() => {
+                          const updated = templates.map((x) =>
+                            x.id === t.id
+                              ? { ...x, name: editTemplateName.trim(), defaultDuration: editTemplateDuration * 60, category: editTemplateCategory }
+                              : x
+                          );
+                          setTemplates(updated);
+                          (window as any).zenstate.saveTemplates(updated);
+                          setEditingTemplateId(null);
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      height: 36,
+                      borderRadius: 6,
+                      background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
+                      fontSize: 12,
+                    }}
+                  >
+                    <span style={{ fontWeight: 500, flex: 1 }}>{t.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', fontFamily: 'var(--font-mono)' }}>
+                      {Math.round(t.defaultDuration / 60)}m
+                    </span>
+                    {t.category && (
+                      <span style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 8,
+                        background: 'var(--zen-secondary-bg)',
+                        color: 'var(--zen-secondary-text)',
+                        border: '1px solid var(--zen-divider)',
+                      }}>
+                        {t.category}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => {
+                        setEditingTemplateId(t.id);
+                        setEditTemplateName(t.name);
+                        setEditTemplateDuration(Math.round(t.defaultDuration / 60));
+                        setEditTemplateCategory(t.category || '');
+                      }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--zen-tertiary-text)', fontSize: 12,
+                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
+                      }}
+                      title="Edit template"
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => {
+                        const updated = templates.filter((x) => x.id !== t.id);
+                        setTemplates(updated);
+                        (window as any).zenstate.saveTemplates(updated);
+                      }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        color: 'var(--zen-tertiary-text)', fontSize: 14,
+                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
+                      }}
+                      title="Remove template"
+                    >
+                      ×
+                    </button>
+                  </div>
                 )}
-                <button
-                  onClick={() => {
-                    const updated = templates.filter((x) => x.id !== t.id);
-                    setTemplates(updated);
-                    (window as any).zenstate.saveTemplates(updated);
-                  }}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--zen-tertiary-text)', fontSize: 14,
-                    padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
-                  }}
-                  title="Remove template"
-                >
-                  ×
-                </button>
               </div>
             ))}
             {templates.length === 0 && (
@@ -870,14 +965,14 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
               value={newTemplateName}
               onChange={(e) => setNewTemplateName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && newTemplateName.trim()) {
+                if (e.key === 'Enter' && newTemplateName.trim() && newTemplateCategory) {
                   const newTemplate: FocusTemplate = {
                     id: crypto.randomUUID(),
                     name: newTemplateName.trim(),
                     icon: 'zap',
                     defaultDuration: newTemplateDuration * 60,
                     color: '#007AFF',
-                    category: newTemplateCategory || undefined,
+                    category: newTemplateCategory,
                   };
                   const updated = [...templates, newTemplate];
                   setTemplates(updated);
@@ -902,7 +997,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           </div>
           {categories.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category (optional)</div>
+              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category *</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {categories.map((cat) => (
                   <button
@@ -920,7 +1015,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
           <button
             className="btn btn-primary"
             style={{ width: '100%', fontSize: 12 }}
-            disabled={!newTemplateName.trim()}
+            disabled={!newTemplateName.trim() || !newTemplateCategory}
             onClick={() => {
               const newTemplate: FocusTemplate = {
                 id: crypto.randomUUID(),
@@ -928,7 +1023,7 @@ export default function SettingsTab({ currentUser, peers, onUserUpdate, onSignOu
                 icon: 'zap',
                 defaultDuration: newTemplateDuration * 60,
                 color: '#007AFF',
-                category: newTemplateCategory || undefined,
+                category: newTemplateCategory,
               };
               const updated = [...templates, newTemplate];
               setTemplates(updated);

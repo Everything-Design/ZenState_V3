@@ -113,6 +113,16 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
       const todayRec = records?.find((r: DailyRecord) => r.date.startsWith(todayStr));
       setTodayTotal(todayRec?.totalFocusTime || 0);
     }).catch(() => {});
+
+    // Listen for settings changes from dashboard
+    (window as any).zenstate.on('settings:updated', (settings: unknown) => {
+      const s = settings as AppSettings;
+      setDailyGoalSeconds(s?.dailyFocusGoalSeconds || 0);
+    });
+
+    return () => {
+      (window as any).zenstate.removeAllListeners?.('settings:updated');
+    };
   }, []);
 
   // Clear pending request when peer responds (accept or decline)
@@ -167,9 +177,10 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   ];
 
   function handleStartTimer() {
-    const label = timerTaskInput.trim() || timerCategory || 'Untitled';
+    if (!timerCategory) return;
+    const label = timerTaskInput.trim() || timerCategory;
     const target = timerMode === 'countdown' ? selectedDuration : undefined;
-    window.zenstate.startTimer(label, timerCategory || undefined, target);
+    window.zenstate.startTimer(label, timerCategory, target);
     setTimerTaskInput('');
     setTimerCategory('');
     setCustomMinutes('');
@@ -442,6 +453,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             <button
               className="btn btn-primary"
               onClick={handleStartTimer}
+              disabled={!timerCategory}
             >
               {timerMode === 'countdown' ? `Start ${formatDuration(selectedDuration)}` : 'Start'}
             </button>
@@ -785,7 +797,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
       {/* Footer */}
       <div className="footer">
         <div className="footer-utils">
-          <button className="footer-icon-btn" onClick={() => window.zenstate.openDashboard()} title="Settings">
+          <button className="footer-icon-btn" onClick={() => window.zenstate.openDashboard('settings')} title="Settings">
             <Settings size={15} />
           </button>
           <button className="footer-icon-btn" onClick={() => setShowTimerInput(true)} title="Record Time">

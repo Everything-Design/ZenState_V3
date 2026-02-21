@@ -10,12 +10,9 @@ const store = new Store({
     categoryColors: {} as Record<string, string>,
     focusSchedules: [] as FocusSchedule[],
     focusTemplates: [
-      { id: '1', name: 'Deep Work', icon: 'brain', defaultDuration: 5400, color: '#5856D6' },
-      { id: '2', name: 'Code Review', icon: 'code', defaultDuration: 1800, color: '#007AFF' },
-      { id: '3', name: 'Writing', icon: 'pencil', defaultDuration: 3600, color: '#34C759' },
-      { id: '4', name: 'Design', icon: 'palette', defaultDuration: 2700, color: '#FF9500' },
-      { id: '5', name: 'Meeting Prep', icon: 'calendar', defaultDuration: 900, color: '#FF3B30' },
-      { id: '6', name: 'Quick Task', icon: 'zap', defaultDuration: 900, color: '#AF52DE' },
+      { id: '1', name: 'Meeting', icon: 'zap', defaultDuration: 1800, color: '#007AFF', category: 'Meetings' },
+      { id: '2', name: 'Discussion', icon: 'zap', defaultDuration: 600, color: '#007AFF', category: 'Meetings' },
+      { id: '3', name: 'Quick Task', icon: 'zap', defaultDuration: 1200, color: '#007AFF', category: 'Meetings' },
     ] as FocusTemplate[],
     emergencyGrantedIds: [] as string[],
     appSettings: {
