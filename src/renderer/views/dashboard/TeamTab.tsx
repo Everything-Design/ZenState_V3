@@ -296,7 +296,10 @@ export default function TeamTab({ currentUser, peers }: Props) {
                   <button
                     className="btn btn-primary"
                     style={{ flex: 1, fontSize: 10 }}
-                    onClick={() => handleSendRequest(peer.id)}
+                    onClick={() => {
+                      setMessagePopup(messagePopup === peer.id ? null : peer.id);
+                      setMessageText('');
+                    }}
                   >
                     💬 Request Meeting
                   </button>
@@ -334,7 +337,17 @@ export default function TeamTab({ currentUser, peers }: Props) {
                     }}
                     style={{ marginBottom: 8 }}
                   />
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 10 }}
+                      onClick={() => {
+                        setMessagePopup(null);
+                        setMessageText('');
+                      }}
+                    >
+                      Cancel
+                    </button>
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: 10 }}

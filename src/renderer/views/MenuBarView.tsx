@@ -705,7 +705,10 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                   <button
                     className="btn btn-primary"
                     style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
-                    onClick={() => handleSendRequest(peer.id)}
+                    onClick={() => {
+                      setMessagePopup(messagePopup === peer.id ? null : peer.id);
+                      setMessageText('');
+                    }}
                   >
                     Request
                   </button>
@@ -738,7 +741,17 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                     }}
                     style={{ fontSize: 11, marginBottom: 6 }}
                   />
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 9, padding: '2px 8px' }}
+                      onClick={() => {
+                        setMessagePopup(null);
+                        setMessageText('');
+                      }}
+                    >
+                      Cancel
+                    </button>
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: 9, padding: '2px 8px' }}
