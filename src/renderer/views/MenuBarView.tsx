@@ -703,14 +703,14 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                   ) : null
                 ) : (
                   <button
-                    className="btn btn-primary"
+                    className={messagePopup === peer.id ? 'btn btn-danger' : 'btn btn-primary'}
                     style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
                     onClick={() => {
                       setMessagePopup(messagePopup === peer.id ? null : peer.id);
                       setMessageText('');
                     }}
                   >
-                    Request
+                    {messagePopup === peer.id ? 'Close' : 'Request'}
                   </button>
                 )}
                 <span className={`status-dot ${peer.status}`} />
@@ -742,16 +742,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                     style={{ fontSize: 11, marginBottom: 6 }}
                   />
                   <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                    <button
-                      className="btn btn-secondary"
-                      style={{ fontSize: 9, padding: '2px 8px' }}
-                      onClick={() => {
-                        setMessagePopup(null);
-                        setMessageText('');
-                      }}
-                    >
-                      Cancel
-                    </button>
                     <button
                       className="btn btn-secondary"
                       style={{ fontSize: 9, padding: '2px 8px' }}
