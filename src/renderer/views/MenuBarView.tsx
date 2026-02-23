@@ -616,33 +616,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         </div>
       )}
 
-      {/* Daily Focus Goal Progress */}
-      {dailyGoalSeconds > 0 && (() => {
-        const effectiveTotal = todayTotal + (timerState.isRunning || timerState.isPaused ? timerState.elapsed : 0);
-        const progress = Math.min(1, effectiveTotal / dailyGoalSeconds);
-        const complete = effectiveTotal >= dailyGoalSeconds;
-        return (
-          <div style={{ padding: '4px 16px 2px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
-              <span style={{ fontSize: 9, color: 'var(--zen-tertiary-text)' }}>
-                {complete ? '🎉' : '🎯'} Daily Goal
-              </span>
-              <span style={{ fontSize: 9, color: complete ? 'var(--status-available)' : 'var(--zen-tertiary-text)' }}>
-                {formatDuration(effectiveTotal)} / {formatDuration(dailyGoalSeconds)}
-              </span>
-            </div>
-            <div style={{ height: 3, borderRadius: 2, background: 'var(--zen-tertiary-bg)', overflow: 'hidden' }}>
-              <div style={{
-                height: '100%', borderRadius: 2,
-                background: complete ? 'var(--status-available)' : 'var(--zen-primary)',
-                width: `${progress * 100}%`,
-                transition: 'width 0.5s ease',
-              }} />
-            </div>
-          </div>
-        );
-      })()}
-
       {/* Presence Bar */}
       <div className="presence-bar">
         <div className="presence-track">
@@ -732,10 +705,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                   <button
                     className="btn btn-primary"
                     style={{ fontSize: 9, padding: '2px 6px', flexShrink: 0 }}
-                    onClick={() => {
-                      setMessagePopup(messagePopup === peer.id ? null : peer.id);
-                      setMessageText('');
-                    }}
+                    onClick={() => handleSendRequest(peer.id)}
                   >
                     Request
                   </button>

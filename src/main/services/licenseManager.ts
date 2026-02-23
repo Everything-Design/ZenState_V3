@@ -13,13 +13,12 @@ const licenseStore = new Store({
   name: 'zenstate-license',
   defaults: {
     licenseKey: null as string | null,
-    deviceId: null as string | null,
+    deviceFingerprint: null as string | null,
   },
 });
 
 /**
  * Generate a stable device fingerprint from hostname + username + platform + arch.
- * This doesn't change unless the OS is reinstalled or the machine is swapped.
  */
 function getDeviceFingerprint(): string {
   const raw = `${os.hostname()}:${os.userInfo().username}:${os.platform()}:${os.arch()}`;
@@ -31,34 +30,21 @@ export class LicenseManager {
 
   /**
    * Activate a license key. Validates the signature, checks expiry,
-   * stores the key if valid, and returns the resulting state.
-   * Admin keys are locked to the first device they're activated on.
+   * stores the key if valid. Admin keys are bound to this device's fingerprint
+   * which is embedded in the stored data — a different device activating the
+   * same key will overwrite the previous device's claim (last-activation wins),
+   * and on next startup the previous device will see the key is no longer bound to it.
    */
   activateLicense(key: string): LicenseState {
     const state = this.validateKey(key);
     if (state.isValid) {
-      const isAdminKey = state.payload?.features.includes('admin') ?? false;
-
-      if (isAdminKey) {
-        const currentDevice = getDeviceFingerprint();
-        const storedDevice = licenseStore.get('deviceId') as string | null;
-
-        if (storedDevice && storedDevice !== currentDevice) {
-          // Admin key already activated on a different device
-          return {
-            isValid: false,
-            isPro: false,
-            isAdmin: false,
-            payload: state.payload,
-            error: 'This admin license is already activated on another device',
-          };
-        }
-
-        // Lock to this device
-        licenseStore.set('deviceId', currentDevice);
-      }
-
       licenseStore.set('licenseKey', key);
+
+      if (state.isAdmin) {
+        licenseStore.set('deviceFingerprint', getDeviceFingerprint());
+      } else {
+        licenseStore.set('deviceFingerprint', null);
+      }
     }
     this.cachedState = state;
     return state;
@@ -79,24 +65,6 @@ export class LicenseManager {
     }
 
     const state = this.validateKey(storedKey);
-
-    // For admin keys, verify device fingerprint matches
-    if (state.isValid && state.isAdmin) {
-      const storedDevice = licenseStore.get('deviceId') as string | null;
-      const currentDevice = getDeviceFingerprint();
-      if (storedDevice && storedDevice !== currentDevice) {
-        const locked: LicenseState = {
-          isValid: false,
-          isPro: false,
-          isAdmin: false,
-          payload: state.payload,
-          error: 'This admin license is already activated on another device',
-        };
-        this.cachedState = locked;
-        return locked;
-      }
-    }
-
     this.cachedState = state;
     return state;
   }
@@ -106,7 +74,7 @@ export class LicenseManager {
    */
   deactivateLicense(): void {
     licenseStore.set('licenseKey', null);
-    licenseStore.set('deviceId', null);
+    licenseStore.set('deviceFingerprint', null);
     this.cachedState = { isValid: false, isPro: false, isAdmin: false, payload: null };
   }
 
