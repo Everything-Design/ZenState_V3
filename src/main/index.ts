@@ -123,6 +123,10 @@ app.on('ready', async () => {
   // Start networking if user exists
   const user = persistence.getUser();
   if (user) {
+    // Sync isAdmin from license state on startup
+    const licenseState = licenseManager.getLicenseState();
+    user.isAdmin = licenseState.isValid && licenseState.isAdmin;
+    persistence.saveUser(user);
     startNetworking(user);
   }
 
@@ -798,6 +802,14 @@ function setupIPC() {
   // License management
   ipcMain.handle(IPC.ACTIVATE_LICENSE, (_e, key: string) => {
     const state = licenseManager.activateLicense(key);
+    // Sync isAdmin flag to user profile
+    const user = persistence.getUser();
+    if (user) {
+      user.isAdmin = state.isValid && state.isAdmin;
+      persistence.saveUser(user);
+      networking?.updateUser(user);
+      broadcastToWindows(IPC.PEER_UPDATED, user);
+    }
     broadcastToWindows('license:changed', state);
     return state;
   });
@@ -809,6 +821,14 @@ function setupIPC() {
   ipcMain.handle(IPC.DEACTIVATE_LICENSE, () => {
     licenseManager.deactivateLicense();
     const state = licenseManager.getLicenseState();
+    // Revoke admin when license is deactivated
+    const user = persistence.getUser();
+    if (user) {
+      user.isAdmin = false;
+      persistence.saveUser(user);
+      networking?.updateUser(user);
+      broadcastToWindows(IPC.PEER_UPDATED, user);
+    }
     broadcastToWindows('license:changed', state);
     return state;
   });

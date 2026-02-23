@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import os from 'os';
 import Store from 'electron-store';
 import { LicensePayload, LicenseState } from '../../shared/types';
 
@@ -12,8 +13,18 @@ const licenseStore = new Store({
   name: 'zenstate-license',
   defaults: {
     licenseKey: null as string | null,
+    deviceId: null as string | null,
   },
 });
+
+/**
+ * Generate a stable device fingerprint from hostname + username + platform + arch.
+ * This doesn't change unless the OS is reinstalled or the machine is swapped.
+ */
+function getDeviceFingerprint(): string {
+  const raw = `${os.hostname()}:${os.userInfo().username}:${os.platform()}:${os.arch()}`;
+  return crypto.createHash('sha256').update(raw).digest('hex');
+}
 
 export class LicenseManager {
   private cachedState: LicenseState | null = null;
@@ -21,10 +32,32 @@ export class LicenseManager {
   /**
    * Activate a license key. Validates the signature, checks expiry,
    * stores the key if valid, and returns the resulting state.
+   * Admin keys are locked to the first device they're activated on.
    */
   activateLicense(key: string): LicenseState {
     const state = this.validateKey(key);
     if (state.isValid) {
+      const isAdminKey = state.payload?.features.includes('admin') ?? false;
+
+      if (isAdminKey) {
+        const currentDevice = getDeviceFingerprint();
+        const storedDevice = licenseStore.get('deviceId') as string | null;
+
+        if (storedDevice && storedDevice !== currentDevice) {
+          // Admin key already activated on a different device
+          return {
+            isValid: false,
+            isPro: false,
+            isAdmin: false,
+            payload: state.payload,
+            error: 'This admin license is already activated on another device',
+          };
+        }
+
+        // Lock to this device
+        licenseStore.set('deviceId', currentDevice);
+      }
+
       licenseStore.set('licenseKey', key);
     }
     this.cachedState = state;
@@ -40,14 +73,30 @@ export class LicenseManager {
 
     const storedKey = licenseStore.get('licenseKey') as string | null;
     if (!storedKey) {
-      const free: LicenseState = { isValid: false, isPro: false, payload: null };
+      const free: LicenseState = { isValid: false, isPro: false, isAdmin: false, payload: null };
       this.cachedState = free;
       return free;
     }
 
     const state = this.validateKey(storedKey);
-    // If stored key is now invalid (e.g. expired), keep it stored
-    // but report the error so the UI can show expiry notice
+
+    // For admin keys, verify device fingerprint matches
+    if (state.isValid && state.isAdmin) {
+      const storedDevice = licenseStore.get('deviceId') as string | null;
+      const currentDevice = getDeviceFingerprint();
+      if (storedDevice && storedDevice !== currentDevice) {
+        const locked: LicenseState = {
+          isValid: false,
+          isPro: false,
+          isAdmin: false,
+          payload: state.payload,
+          error: 'This admin license is already activated on another device',
+        };
+        this.cachedState = locked;
+        return locked;
+      }
+    }
+
     this.cachedState = state;
     return state;
   }
@@ -57,7 +106,8 @@ export class LicenseManager {
    */
   deactivateLicense(): void {
     licenseStore.set('licenseKey', null);
-    this.cachedState = { isValid: false, isPro: false, payload: null };
+    licenseStore.set('deviceId', null);
+    this.cachedState = { isValid: false, isPro: false, isAdmin: false, payload: null };
   }
 
   /**
@@ -89,7 +139,7 @@ export class LicenseManager {
     try {
       const dotIndex = key.indexOf('.');
       if (dotIndex === -1) {
-        return { isValid: false, isPro: false, payload: null, error: 'Invalid license key format' };
+        return { isValid: false, isPro: false, isAdmin: false, payload: null, error: 'Invalid license key format' };
       }
 
       const signatureB64 = key.substring(0, dotIndex);
@@ -108,7 +158,7 @@ export class LicenseManager {
       );
 
       if (!isVerified) {
-        return { isValid: false, isPro: false, payload: null, error: 'Invalid license key signature' };
+        return { isValid: false, isPro: false, isAdmin: false, payload: null, error: 'Invalid license key signature' };
       }
 
       // Parse payload
@@ -117,19 +167,20 @@ export class LicenseManager {
       // Check expiry
       const expiresAt = new Date(payload.expiresAt);
       if (isNaN(expiresAt.getTime())) {
-        return { isValid: false, isPro: false, payload, error: 'Invalid expiry date in license' };
+        return { isValid: false, isPro: false, isAdmin: false, payload, error: 'Invalid expiry date in license' };
       }
       if (expiresAt < new Date()) {
-        return { isValid: false, isPro: false, payload, error: `License expired on ${expiresAt.toLocaleDateString()}` };
+        return { isValid: false, isPro: false, isAdmin: false, payload, error: `License expired on ${expiresAt.toLocaleDateString()}` };
       }
 
-      // Valid! Determine if Pro
+      // Valid! Determine flags
       const isPro = payload.features.includes('pro');
+      const isAdmin = payload.features.includes('admin');
 
-      return { isValid: true, isPro, payload };
+      return { isValid: true, isPro, isAdmin, payload };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error validating license';
-      return { isValid: false, isPro: false, payload: null, error: message };
+      return { isValid: false, isPro: false, isAdmin: false, payload: null, error: message };
     }
   }
 }

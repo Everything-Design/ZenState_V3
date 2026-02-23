@@ -29,7 +29,7 @@ export default function SettingsView({ currentUser, peers, onUserUpdate, onSignO
     }).catch(() => {});
   }, []);
 
-  const isAdmin = currentUser.username.toLowerCase() === 'saurabh';
+  const isAdmin = currentUser.isAdmin === true;
 
   function handleEmojiChange(emoji: string) {
     onUserUpdate({ avatarEmoji: emoji });

@@ -115,6 +115,7 @@ export interface LicensePayload {
 export interface LicenseState {
   isValid: boolean;
   isPro: boolean;
+  isAdmin: boolean;
   payload: LicensePayload | null;
   error?: string;
 }
