@@ -301,7 +301,7 @@ export default function TeamTab({ currentUser, peers }: Props) {
                       setMessageText('');
                     }}
                   >
-                    {messagePopup === peer.id ? 'Close' : '💬 Request Meeting'}
+                    {messagePopup === peer.id ? 'Close' : 'Request Meeting'}
                   </button>
                 )}
               </div>
