@@ -9,6 +9,8 @@ const SERVICE_TYPE = 'zenstate';
 const BEACON_PORT = 5354;
 const HEARTBEAT_INTERVAL = 5000;
 const BEACON_INTERVAL = 10000;
+const SIGNAL_POLL_INTERVAL = 15000;
+const SIGNAL_SERVER_URL = 'https://zenstate-two.vercel.app';
 
 /**
  * NetworkingService — Port of BonjourService.swift
@@ -37,6 +39,7 @@ export class NetworkingService extends EventEmitter {
 
   private pendingRetries = new Map<string, number>(); // endpoint → retry count
   private pendingConnections = new Set<string>(); // endpoints currently connecting
+  private signalTimer: NodeJS.Timeout | null = null;
 
   constructor(user: User) {
     super();
@@ -75,6 +78,7 @@ export class NetworkingService extends EventEmitter {
   stop() {
     this.heartbeatTimer && clearInterval(this.heartbeatTimer);
     this.beaconTimer && clearInterval(this.beaconTimer);
+    this.signalTimer && clearInterval(this.signalTimer);
 
     this.bonjourBrowser?.stop();
     this.bonjourService && this.bonjour?.unpublishAll();
@@ -228,11 +232,12 @@ export class NetworkingService extends EventEmitter {
       this.tcpPort = addr.port;
       console.log(`TCP server listening on port ${this.tcpPort}`);
 
-      // Now start Bonjour advertising + browsing + beacons
+      // Now start Bonjour advertising + browsing + beacons + signaling
       this.startBonjour();
       this.startHeartbeat();
       this.startBeaconListener();
       this.startBeaconBroadcast();
+      this.startSignaling();
     });
   }
 
@@ -631,5 +636,55 @@ export class NetworkingService extends EventEmitter {
     this.beaconSocket.send(data, BEACON_PORT, '255.255.255.255', (err) => {
       if (err) console.error('Beacon send error:', err);
     });
+  }
+
+  // ── Signaling Server (cloud-assisted discovery) ────────────
+
+  private startSignaling() {
+    // Send initial heartbeat immediately, then poll on interval
+    this.signalHeartbeat();
+    this.signalTimer = setInterval(() => this.signalHeartbeat(), SIGNAL_POLL_INTERVAL);
+  }
+
+  private async signalHeartbeat() {
+    if (!this.tcpPort) return;
+
+    const addresses = this.getLocalAddresses();
+    const ip = addresses[0]; // primary LAN IP
+    if (!ip) return;
+
+    try {
+      // Register presence
+      await fetch(`${SIGNAL_SERVER_URL}/api/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: this.currentUser.id,
+          name: this.currentUser.name,
+          username: this.currentUser.username,
+          ip,
+          port: this.tcpPort,
+        }),
+      });
+
+      // Fetch peers
+      const res = await fetch(
+        `${SIGNAL_SERVER_URL}/api/peers?exclude=${encodeURIComponent(this.currentUser.id)}`
+      );
+      if (!res.ok) return;
+
+      const data = await res.json() as { peers: Array<{ userId: string; ip: string; port: number }> };
+
+      for (const peer of data.peers) {
+        // Skip if already connected
+        const existing = this.connections.get(peer.userId);
+        if (existing && !existing.destroyed) continue;
+
+        console.log(`Signal: discovered peer ${peer.userId} at ${peer.ip}:${peer.port}`);
+        this.connectToEndpoint(peer.ip, peer.port);
+      }
+    } catch (err) {
+      // Silently ignore — signaling is a supplementary discovery method
+    }
   }
 }
