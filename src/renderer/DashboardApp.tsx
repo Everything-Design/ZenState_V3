@@ -103,32 +103,40 @@ export default function DashboardApp() {
   useEffect(() => {
     window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
       const p = peer as User;
-      setPeers((prev) => {
-        const idx = prev.findIndex((x) => x.id === p.id);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = p;
-          return updated;
-        }
-        return [...prev, p];
+      // Use setState callback to check current user ID without stale closure
+      setCurrentUser((cur) => {
+        if (cur && cur.id === p.id) return cur; // It's us, skip adding to peers
+        // Not us — add to peers
+        setPeers((prev) => {
+          const idx = prev.findIndex((x) => x.id === p.id);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = p;
+            return updated;
+          }
+          return [...prev, p];
+        });
+        return cur;
       });
     });
 
     window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
       const p = peer as User;
-      setPeers((prev) => {
-        const idx = prev.findIndex((x) => x.id === p.id);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = p;
-          return updated;
-        }
-        return [...prev, p];
+      // Use setState callback to get fresh current user
+      setCurrentUser((cur) => {
+        if (cur && cur.id === p.id) return p; // Update self
+        // Not us — update peers
+        setPeers((prev) => {
+          const idx = prev.findIndex((x) => x.id === p.id);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = p;
+            return updated;
+          }
+          return [...prev, p];
+        });
+        return cur;
       });
-      // Also update current user if it's us
-      if (currentUser && p.id === currentUser.id) {
-        setCurrentUser(p);
-      }
     });
 
     window.zenstate.on(IPC.PEER_LOST, (peerId: unknown) => {

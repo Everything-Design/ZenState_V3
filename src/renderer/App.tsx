@@ -48,29 +48,35 @@ export default function App() {
   useEffect(() => {
     window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
       const p = peer as User;
-      setPeers((prev) => {
-        const existing = prev.findIndex((x) => x.id === p.id);
-        if (existing >= 0) {
-          const updated = [...prev];
-          updated[existing] = p;
-          return updated;
-        }
-        return [...prev, p];
+      setCurrentUser((cur) => {
+        if (cur && cur.id === p.id) return cur; // It's us, skip
+        setPeers((prev) => {
+          const existing = prev.findIndex((x) => x.id === p.id);
+          if (existing >= 0) {
+            const updated = [...prev];
+            updated[existing] = p;
+            return updated;
+          }
+          return [...prev, p];
+        });
+        return cur;
       });
     });
 
     window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
       const p = peer as User;
-      // Update own user if it's us (e.g. status changed from another window)
-      setCurrentUser((prev) => prev && prev.id === p.id ? p : prev);
-      setPeers((prev) => {
-        const idx = prev.findIndex((x) => x.id === p.id);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = p;
-          return updated;
-        }
-        return [...prev, p];
+      setCurrentUser((cur) => {
+        if (cur && cur.id === p.id) return p; // Update self
+        setPeers((prev) => {
+          const idx = prev.findIndex((x) => x.id === p.id);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = p;
+            return updated;
+          }
+          return [...prev, p];
+        });
+        return cur;
       });
     });
 
