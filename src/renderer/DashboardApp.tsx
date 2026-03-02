@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, AvailabilityStatus, DailyRecord, IPC, AppSettings, FocusTemplate, LicenseState } from '../shared/types';
 import DashboardView from './views/DashboardView';
+import LoginView from './views/LoginView';
 
 // Type declaration for the preload bridge
 declare global {
@@ -80,6 +81,7 @@ export default function DashboardApp() {
   const [requestedTab, setRequestedTab] = useState<string | undefined>(undefined);
   const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, payload: null });
   const prevTimerRunning = useRef(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function init() {
@@ -93,6 +95,7 @@ export default function DashboardApp() {
       setRecords(allRecords);
       const license = await window.zenstate.getLicenseState();
       setLicenseState(license);
+      setLoading(false);
     }
     init();
   }, []);
@@ -214,10 +217,24 @@ export default function DashboardApp() {
     setPeers([]);
   }, []);
 
+  const handleLogin = useCallback(async (user: User) => {
+    await window.zenstate.saveUser(user);
+    window.zenstate.login(user);
+    setCurrentUser(user);
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="dashboard" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <div className="pulse" style={{ color: 'var(--zen-secondary-text)' }}>Loading...</div>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
-      <div className="dashboard" style={{ alignItems: 'center', justifyContent: 'center' }}>
-        <div className="pulse" style={{ color: 'var(--zen-secondary-text)' }}>Loading...</div>
+      <div className="dashboard" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <LoginView onLogin={handleLogin} />
       </div>
     );
   }

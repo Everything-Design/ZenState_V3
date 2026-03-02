@@ -27,6 +27,11 @@ export function createPopoverWindow(url: string): BrowserWindow {
     },
   });
 
+  // Show on all desktops/spaces so the popover doesn't pull focus to the main desktop
+  if (isMac) {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  }
+
   win.loadURL(url);
 
   // Open DevTools in dev mode for debugging

@@ -106,6 +106,8 @@ app.on('ready', async () => {
           }
         });
       } else {
+        if (dashboardWindow.isMinimized()) dashboardWindow.restore();
+        dashboardWindow.show();
         dashboardWindow.focus();
       }
     },
@@ -120,7 +122,7 @@ app.on('ready', async () => {
   // Register global shortcuts
   registerShortcuts();
 
-  // Start networking if user exists
+  // Start networking if user exists, or show Dashboard for onboarding
   const user = persistence.getUser();
   if (user) {
     // Sync isAdmin from license state on startup
@@ -128,6 +130,16 @@ app.on('ready', async () => {
     user.isAdmin = licenseState.isValid && licenseState.isAdmin;
     persistence.saveUser(user);
     startNetworking(user);
+  } else {
+    // First launch — open Dashboard for onboarding instead of the tiny popover
+    dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
+    if (process.platform === 'darwin') app.dock?.show();
+    dashboardWindow.on('closed', () => {
+      dashboardWindow = null;
+      if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
+        app.dock?.hide();
+      }
+    });
   }
 
   // Auto-update (production only)
@@ -648,6 +660,8 @@ function setupIPC() {
         });
       }
     } else {
+      if (dashboardWindow.isMinimized()) dashboardWindow.restore();
+      dashboardWindow.show();
       dashboardWindow.focus();
       if (tab) {
         dashboardWindow.webContents.send('dashboard:switch-tab', tab);

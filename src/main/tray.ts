@@ -61,6 +61,8 @@ export function createTray(callbacks: TrayCallbacks) {
 
   const icon = createTrayIcon();
   tray = new Tray(icon);
+  // Prevent garbage collection on some systems by pinning to global
+  (global as any).__zenstateTray = tray;
   tray.setToolTip('ZenState');
 
   tray.on('click', () => {
