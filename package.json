@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "4.0.8",
+  "version": "4.0.9",
   "description": "ZenState - Everything Flow",
   "main": "dist/main/index.js",
   "scripts": {
@@ -52,13 +52,15 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ],
