@@ -187,6 +187,77 @@ export default function NetworkTab() {
         </div>
       </div>
 
+      {/* Peer Connection Section */}
+      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
+          <Link size={14} color="var(--zen-primary)" />
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Peer Connection</span>
+        </div>
+
+        {/* Local Address */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Your Address
+          </div>
+          {localInfo.addresses.length > 0 ? (
+            localInfo.addresses.map((addr) => (
+              <div key={addr} style={{
+                padding: '6px 10px',
+                borderRadius: 6,
+                background: 'rgba(255,255,255,0.04)',
+                fontSize: 12,
+                fontFamily: 'var(--font-mono)',
+                marginBottom: 4,
+              }}>
+                {addr}:{localInfo.port}
+              </div>
+            ))
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
+              Not connected to a network
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 4 }}>
+            Share this address with team members who can't auto-discover you.
+          </div>
+        </div>
+
+        <div className="divider" style={{ margin: '12px 0' }} />
+
+        {/* Manual Connect */}
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Connect to Peer
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="text-input"
+              placeholder="IP:Port (e.g. 192.168.1.5:54321)"
+              value={connectIpInput}
+              onChange={(e) => setConnectIpInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleConnectIP(); }}
+              style={{ flex: 1, fontSize: 12 }}
+            />
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 11 }}
+              onClick={handleConnectIP}
+              disabled={!connectIpInput.trim()}
+            >
+              Connect
+            </button>
+          </div>
+          {connectStatus && (
+            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 6 }}>
+              {connectStatus}
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 6 }}>
+            Use this to manually connect to a team member when auto-discovery isn't working.
+          </div>
+        </div>
+      </div>
+
       {/* Current Connection Card */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -342,77 +413,6 @@ export default function NetworkTab() {
           </div>
         </div>
       )}
-
-      {/* Peer Connection Section */}
-      <div className="card" style={{ padding: 16, marginTop: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}>
-          <Link size={14} color="var(--zen-primary)" />
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Peer Connection</span>
-        </div>
-
-        {/* Local Address */}
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Your Address
-          </div>
-          {localInfo.addresses.length > 0 ? (
-            localInfo.addresses.map((addr) => (
-              <div key={addr} style={{
-                padding: '6px 10px',
-                borderRadius: 6,
-                background: 'rgba(255,255,255,0.04)',
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
-                marginBottom: 4,
-              }}>
-                {addr}:{localInfo.port}
-              </div>
-            ))
-          ) : (
-            <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
-              Not connected to a network
-            </div>
-          )}
-          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 4 }}>
-            Share this address with team members who can't auto-discover you.
-          </div>
-        </div>
-
-        <div className="divider" style={{ margin: '12px 0' }} />
-
-        {/* Manual Connect */}
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Connect to Peer
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="text-input"
-              placeholder="IP:Port (e.g. 192.168.1.5:54321)"
-              value={connectIpInput}
-              onChange={(e) => setConnectIpInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleConnectIP(); }}
-              style={{ flex: 1, fontSize: 12 }}
-            />
-            <button
-              className="btn btn-primary"
-              style={{ fontSize: 11 }}
-              onClick={handleConnectIP}
-              disabled={!connectIpInput.trim()}
-            >
-              Connect
-            </button>
-          </div>
-          {connectStatus && (
-            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 6 }}>
-              {connectStatus}
-            </div>
-          )}
-          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 6 }}>
-            Use this to manually connect to a team member when auto-discovery isn't working.
-          </div>
-        </div>
-      </div>
 
       {/* Auto-refresh toggle */}
       <div style={{
