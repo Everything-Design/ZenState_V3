@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "4.0.10",
+  "version": "4.0.11",
   "description": "ZenState - Everything Flow",
   "main": "dist/main/index.js",
   "scripts": {
