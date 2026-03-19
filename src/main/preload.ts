@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   saveTemplates: (templates: unknown) => ipcRenderer.invoke(IPC.SAVE_TEMPLATES, templates),
   connectToIP: (host: string, port: number) => ipcRenderer.invoke('network:connect-ip', { host, port }),
   getLocalInfo: () => ipcRenderer.invoke('network:get-local-info'),
+  getWiFiInfo: () => ipcRenderer.invoke('network:get-wifi-info'),
   checkForUpdate: () => ipcRenderer.invoke('app:check-for-update'),
   activateLicense: (key: string) => ipcRenderer.invoke(IPC.ACTIVATE_LICENSE, key),
   getLicenseState: () => ipcRenderer.invoke(IPC.GET_LICENSE_STATE),

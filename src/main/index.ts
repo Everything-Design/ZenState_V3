@@ -813,6 +813,64 @@ function setupIPC() {
     return { addresses: [], port: 0 };
   });
 
+  // Network: get WiFi info
+  ipcMain.handle('network:get-wifi-info', async () => {
+    const { execFile } = require('child_process');
+    const path = require('path');
+
+    if (process.platform === 'darwin') {
+      // Use compiled Swift helper that calls CoreWLAN
+      const helperPath = app.isPackaged
+        ? path.join(process.resourcesPath, 'wifi-info')
+        : path.join(__dirname, '../../resources/wifi-info');
+
+      return new Promise((resolve) => {
+        execFile(helperPath, { timeout: 10000 }, (err: Error | null, stdout: string) => {
+          if (err) {
+            resolve({ error: err.message });
+            return;
+          }
+          try {
+            resolve(JSON.parse(stdout));
+          } catch {
+            resolve({ error: 'Failed to parse WiFi info' });
+          }
+        });
+      });
+    } else if (process.platform === 'win32') {
+      // Windows: parse netsh output
+      return new Promise((resolve) => {
+        execFile('netsh', ['wlan', 'show', 'interfaces'], { timeout: 10000 }, (err: Error | null, stdout: string) => {
+          if (err) {
+            resolve({ error: err.message });
+            return;
+          }
+          const get = (key: string) => {
+            const m = stdout.match(new RegExp(`^\\s*${key}\\s*:\\s*(.+)$`, 'm'));
+            return m ? m[1].trim() : '';
+          };
+          const signalPercent = parseInt(get('Signal'), 10) || 0;
+          // Convert Windows signal % to approximate dBm
+          const rssi = signalPercent > 0 ? Math.round(signalPercent / 2 - 100) : 0;
+          resolve({
+            ssid: get('SSID'),
+            bssid: get('BSSID'),
+            rssi,
+            noise: 0,
+            channel: parseInt(get('Channel'), 10) || 0,
+            band: get('Radio type')?.includes('802.11a') || get('Radio type')?.includes('802.11ac') || get('Radio type')?.includes('802.11ax') ? '5GHz' : '2.4GHz',
+            txRate: parseFloat(get('Receive rate')) || parseFloat(get('Transmit rate')) || 0,
+            security: get('Authentication'),
+            phyMode: get('Radio type'),
+            signalPercent,
+            nearbyNetworks: [],
+          });
+        });
+      });
+    }
+    return { error: 'Unsupported platform' };
+  });
+
   // License management
   ipcMain.handle(IPC.ACTIVATE_LICENSE, (_e, key: string) => {
     const state = licenseManager.activateLicense(key);

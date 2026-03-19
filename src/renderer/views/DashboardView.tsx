@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Timer, ClipboardList, Settings, MessageCircle } from 'lucide-react';
+import { Users, Timer, ClipboardList, Settings, MessageCircle, Wifi } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord, LicenseState } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimerTab from './dashboard/TimerTab';
 import TimesheetTab from './dashboard/TimesheetTab';
 import SettingsTab from './dashboard/SettingsTab';
+import NetworkTab from './dashboard/NetworkTab';
 
 interface TimerState {
   elapsed: number;
@@ -57,7 +58,7 @@ function getStatusLabel(status: AvailabilityStatus): string {
   }
 }
 
-type Tab = 'team' | 'timer' | 'timesheet' | 'settings';
+type Tab = 'team' | 'timer' | 'timesheet' | 'settings' | 'network';
 
 function formatRevertTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -70,7 +71,7 @@ export default function DashboardView({ currentUser, peers, timerState, records,
   const [activeTab, setActiveTab] = useState<Tab>('team');
 
   useEffect(() => {
-    if (requestedTab && ['team', 'timer', 'timesheet', 'settings'].includes(requestedTab)) {
+    if (requestedTab && ['team', 'timer', 'timesheet', 'settings', 'network'].includes(requestedTab)) {
       setActiveTab(requestedTab as Tab);
       onRequestedTabHandled?.();
     }
@@ -295,6 +296,12 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             <ClipboardList size={16} /> Timesheet
           </button>
           <button
+            className={`tab-btn ${activeTab === 'network' ? 'active' : ''}`}
+            onClick={() => setActiveTab('network')}
+          >
+            <Wifi size={16} /> Network
+          </button>
+          <button
             className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => setActiveTab('settings')}
           >
@@ -326,6 +333,9 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             isPro={isPro}
             onRefreshRecords={onRefreshRecords}
           />
+        )}
+        {activeTab === 'network' && (
+          <NetworkTab />
         )}
         {activeTab === 'settings' && (
           <SettingsTab
