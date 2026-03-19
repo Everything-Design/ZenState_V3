@@ -122,14 +122,10 @@ export default function NetworkTab() {
     };
   }, [autoRefresh]);
 
-  const connectedBSSID = wifiInfo?.bssid || '';
-  const sameSSIDNetworks = wifiInfo?.nearbyNetworks?.filter(
-    (n) => n.ssid === wifiInfo.ssid && n.ssid !== ''
-  ) || [];
-  // If SSID is empty (redacted), show all scanned networks as potential extensions
-  const extensions = wifiInfo?.ssid
-    ? sameSSIDNetworks
-    : wifiInfo?.nearbyNetworks || [];
+  // Find the connected access point by matching channel + band
+  const connectedAP = wifiInfo?.nearbyNetworks?.find(
+    (n) => n.channel === wifiInfo.channel && n.band === wifiInfo.band
+  ) || null;
 
   if (loading) {
     return (
@@ -315,104 +311,59 @@ export default function NetworkTab() {
         </div>
       </div>
 
-      {/* Access Points / Extensions */}
-      {extensions.length > 0 && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>
-              WiFi Access Points
-            </h3>
-            <span style={{
-              fontSize: 10,
-              background: 'rgba(255,255,255,0.08)',
-              padding: '2px 6px',
-              borderRadius: 8,
-              color: 'var(--zen-secondary-text)',
-            }}>
-              {extensions.length} found
-            </span>
+      {/* Connected Access Point */}
+      <div style={{ marginBottom: 16 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 10px' }}>
+          Connected Access Point
+        </h3>
+        <div className="card" style={{
+          padding: 12,
+          border: '1px solid var(--zen-primary)',
+          position: 'relative',
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: 8,
+            right: 8,
+            fontSize: 9,
+            background: 'var(--zen-primary)',
+            color: 'white',
+            padding: '2px 6px',
+            borderRadius: 4,
+            fontWeight: 600,
+          }}>
+            CONNECTED
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {extensions
-              .sort((a, b) => b.rssi - a.rssi)
-              .map((net, i) => {
-                const isConnected = connectedBSSID && net.bssid === connectedBSSID;
-                const netSignal = rssiToLabel(net.rssi);
-                const netPct = rssiToPercent(net.rssi);
-
-                return (
-                  <div
-                    key={net.bssid || i}
-                    className="card"
-                    style={{
-                      padding: 12,
-                      border: isConnected ? '1px solid var(--zen-primary)' : '1px solid transparent',
-                      position: 'relative',
-                    }}
-                  >
-                    {isConnected && (
-                      <div style={{
-                        position: 'absolute',
-                        top: 8,
-                        right: 8,
-                        fontSize: 9,
-                        background: 'var(--zen-primary)',
-                        color: 'white',
-                        padding: '2px 6px',
-                        borderRadius: 4,
-                        fontWeight: 600,
-                      }}>
-                        CONNECTED
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <SignalBar rssi={net.rssi} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>
-                            {net.bssid || `Extension ${i + 1}`}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 3 }}>
-                          <span>Ch {net.channel} ({net.band})</span>
-                          <span style={{ color: netSignal.color }}>{net.rssi} dBm ({netPct}%)</span>
-                          <span style={{ color: netSignal.color }}>{netSignal.label}</span>
-                        </div>
-                      </div>
-                    </div>
-                    {/* Mini signal bar */}
-                    <div style={{
-                      marginTop: 8,
-                      height: 3,
-                      borderRadius: 2,
-                      background: 'rgba(255,255,255,0.06)',
-                      overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        height: '100%',
-                        width: `${netPct}%`,
-                        borderRadius: 2,
-                        background: netSignal.color,
-                        transition: 'width 0.5s ease',
-                      }} />
-                    </div>
-                  </div>
-                );
-              })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <SignalBar rssi={wifiInfo?.rssi || -90} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                {connectedAP?.bssid || wifiInfo?.bssid || `AP-${wifiInfo?.channel}-${wifiInfo?.band}`}
+              </div>
+              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 3 }}>
+                <span>Ch {wifiInfo?.channel} ({wifiInfo?.band})</span>
+                <span style={{ color: signalInfo.color }}>{wifiInfo?.rssi} dBm ({signalPct}%)</span>
+                <span style={{ color: signalInfo.color }}>{signalInfo.label}</span>
+              </div>
+            </div>
+          </div>
+          <div style={{
+            marginTop: 8,
+            height: 3,
+            borderRadius: 2,
+            background: 'rgba(255,255,255,0.06)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${signalPct}%`,
+              borderRadius: 2,
+              background: signalInfo.color,
+              transition: 'width 0.5s ease',
+            }} />
           </div>
         </div>
-      )}
-
-      {extensions.length === 0 && !wifiInfo?.ssid && (
-        <div className="card" style={{ padding: 16, textAlign: 'center' }}>
-          <div style={{ color: 'var(--zen-secondary-text)', fontSize: 12 }}>
-            SSID and BSSID require Location Services permission.
-          </div>
-          <div style={{ color: 'var(--zen-tertiary-text)', fontSize: 11, marginTop: 4 }}>
-            Grant location access in System Settings &gt; Privacy &amp; Security &gt; Location Services to identify access point extensions.
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Auto-refresh toggle */}
       <div style={{
