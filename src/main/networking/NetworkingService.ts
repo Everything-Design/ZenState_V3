@@ -11,6 +11,8 @@ const HEARTBEAT_INTERVAL = 5000;
 const BEACON_INTERVAL = 10000;
 const SIGNAL_POLL_INTERVAL = 15000;
 const SIGNAL_SERVER_URL = 'https://zenstate-two.vercel.app';
+const NETWORK_CHECK_INTERVAL = 10000; // Check for IP changes every 10s
+const PEER_STALE_THRESHOLD = 60000; // Remove peers with no activity for 60s
 
 /**
  * NetworkingService — Port of BonjourService.swift
@@ -40,6 +42,10 @@ export class NetworkingService extends EventEmitter {
   private pendingRetries = new Map<string, number>(); // endpoint → retry count
   private pendingConnections = new Set<string>(); // endpoints currently connecting
   private signalTimer: NodeJS.Timeout | null = null;
+  private networkCheckTimer: NodeJS.Timeout | null = null;
+  private lastKnownAddresses: string[] = []; // Track IP changes
+  private peerLastActivity = new Map<string, number>(); // userId → timestamp of last received message
+  private isRestarting = false;
 
   constructor(user: User) {
     super();
@@ -59,6 +65,7 @@ export class NetworkingService extends EventEmitter {
       if (conn === socket) {
         this.connections.delete(userId);
         this.peers.delete(userId);
+        this.peerLastActivity.delete(userId);
         this.emit('peerLost', userId);
         break;
       }
@@ -79,6 +86,7 @@ export class NetworkingService extends EventEmitter {
     this.heartbeatTimer && clearInterval(this.heartbeatTimer);
     this.beaconTimer && clearInterval(this.beaconTimer);
     this.signalTimer && clearInterval(this.signalTimer);
+    this.networkCheckTimer && clearInterval(this.networkCheckTimer);
 
     this.bonjourBrowser?.stop();
     this.bonjourService && this.bonjour?.unpublishAll();
@@ -92,9 +100,83 @@ export class NetworkingService extends EventEmitter {
     }
     this.connections.clear();
     this.peers.clear();
+    this.peerLastActivity.clear();
     this.pendingConnections.clear();
 
     this.tcpServer?.close();
+  }
+
+  /**
+   * Gracefully restart all networking after a network change (WiFi switch, resume from sleep).
+   * Tears down stale connections and rebinds to the new network interface.
+   */
+  async restart() {
+    if (this.isRestarting) return;
+    this.isRestarting = true;
+    console.log('NetworkingService: restarting due to network change...');
+
+    // Stop timers and discovery
+    this.heartbeatTimer && clearInterval(this.heartbeatTimer);
+    this.beaconTimer && clearInterval(this.beaconTimer);
+    this.signalTimer && clearInterval(this.signalTimer);
+    // Keep networkCheckTimer running — it's what triggers restart
+
+    // Teardown Bonjour
+    try {
+      this.bonjourBrowser?.stop();
+      this.bonjourService && this.bonjour?.unpublishAll();
+      this.bonjour?.destroy();
+    } catch (err) {
+      console.error('Bonjour teardown error:', err);
+    }
+    this.bonjour = null;
+    this.bonjourBrowser = null;
+    this.bonjourService = null;
+
+    // Teardown UDP sockets
+    try { this.beaconSocket?.close(); } catch (_) { /* ignore */ }
+    try { this.beaconListener?.close(); } catch (_) { /* ignore */ }
+    this.beaconSocket = null;
+    this.beaconListener = null;
+
+    // Destroy all peer sockets — they are bound to old network
+    for (const [userId, socket] of this.connections) {
+      socket.destroy();
+      this.emit('peerLost', userId);
+    }
+    this.connections.clear();
+    this.peers.clear();
+    this.peerLastActivity.clear();
+    this.pendingConnections.clear();
+    this.pendingRetries.clear();
+
+    // Close old TCP server
+    const oldServer = this.tcpServer;
+    this.tcpServer = null;
+    this.tcpPort = 0;
+
+    await new Promise<void>((resolve) => {
+      if (oldServer) {
+        oldServer.close(() => resolve());
+      } else {
+        resolve();
+      }
+    });
+
+    // Re-initialize everything on new network
+    this.lastKnownAddresses = this.getLocalAddresses();
+    this.startTCPServer();
+    this.isRestarting = false;
+    console.log('NetworkingService: restart complete, new IPs:', this.lastKnownAddresses);
+  }
+
+  /**
+   * Called on system resume from sleep to handle potential network changes.
+   */
+  handleSystemResume() {
+    console.log('NetworkingService: system resumed from sleep, scheduling restart...');
+    // Delay slightly to let OS re-establish WiFi
+    setTimeout(() => this.restart(), 3000);
   }
 
   updateUser(user: User) {
@@ -232,12 +314,16 @@ export class NetworkingService extends EventEmitter {
       this.tcpPort = addr.port;
       console.log(`TCP server listening on port ${this.tcpPort}`);
 
+      // Capture initial IPs for change detection
+      this.lastKnownAddresses = this.getLocalAddresses();
+
       // Now start Bonjour advertising + browsing + beacons + signaling
       this.startBonjour();
       this.startHeartbeat();
       this.startBeaconListener();
       this.startBeaconBroadcast();
       this.startSignaling();
+      this.startNetworkChangeDetection();
     });
   }
 
@@ -448,11 +534,21 @@ export class NetworkingService extends EventEmitter {
   }
 
   private handleReceivedMessage(message: PeerMessage, socket: net.Socket) {
+    // Track activity for any message from a known sender
+    if (message.senderId) {
+      this.peerLastActivity.set(message.senderId, Date.now());
+    }
+
     switch (message.type) {
       case MessageType.UserInfo: {
         if (message.payload) {
           try {
-            const user: User = JSON.parse(Buffer.from(message.payload, 'base64').toString('utf-8'));
+            const raw = JSON.parse(Buffer.from(message.payload, 'base64').toString('utf-8'));
+            const user = this.validateUserProfile(raw);
+            if (!user) {
+              console.warn('Rejected invalid user profile from:', message.senderId);
+              break;
+            }
 
             // Clean up stale connection if different socket exists
             const existingSocket = this.connections.get(user.id);
@@ -461,8 +557,10 @@ export class NetworkingService extends EventEmitter {
               existingSocket.destroy();
             }
 
+            user.lastSeen = new Date().toISOString();
             this.connections.set(user.id, socket);
             this.peers.set(user.id, user);
+            this.peerLastActivity.set(user.id, Date.now());
 
             if (isNewPeer) {
               this.sendUserInfo(socket); // Bidirectional discovery
@@ -481,8 +579,13 @@ export class NetworkingService extends EventEmitter {
       case MessageType.Heartbeat: {
         if (message.payload) {
           try {
-            const user: User = JSON.parse(Buffer.from(message.payload, 'base64').toString('utf-8'));
+            const raw = JSON.parse(Buffer.from(message.payload, 'base64').toString('utf-8'));
+            const user = this.validateUserProfile(raw);
+            if (!user) break;
+
+            user.lastSeen = new Date().toISOString();
             this.peers.set(user.id, user);
+            this.peerLastActivity.set(user.id, Date.now());
             this.emit('peerUpdated', user);
           } catch (err) {
             console.error('Failed to decode status/heartbeat:', err);
@@ -559,11 +662,19 @@ export class NetworkingService extends EventEmitter {
   private startHeartbeat() {
     this.heartbeatTimer = setInterval(() => {
       this.currentUser.lastSeen = new Date().toISOString();
+      const now = Date.now();
 
-      // Clean up dead connections
+      // Clean up dead connections and stale peers
       for (const [userId, socket] of this.connections) {
         if (socket.destroyed) {
           this.cleanupSocket(socket, 'heartbeat cleanup');
+          continue;
+        }
+        // Check for stale peers — no activity for PEER_STALE_THRESHOLD
+        const lastActivity = this.peerLastActivity.get(userId);
+        if (lastActivity && (now - lastActivity) > PEER_STALE_THRESHOLD) {
+          console.log(`Peer ${userId} stale (no activity for ${Math.round((now - lastActivity) / 1000)}s)`);
+          this.cleanupSocket(socket, 'stale peer timeout');
         }
       }
 
@@ -653,6 +764,9 @@ export class NetworkingService extends EventEmitter {
     const ip = addresses[0]; // primary LAN IP
     if (!ip) return;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     try {
       // Register presence
       await fetch(`${SIGNAL_SERVER_URL}/api/heartbeat`, {
@@ -665,11 +779,13 @@ export class NetworkingService extends EventEmitter {
           ip,
           port: this.tcpPort,
         }),
+        signal: controller.signal,
       });
 
       // Fetch peers
       const res = await fetch(
-        `${SIGNAL_SERVER_URL}/api/peers?exclude=${encodeURIComponent(this.currentUser.id)}`
+        `${SIGNAL_SERVER_URL}/api/peers?exclude=${encodeURIComponent(this.currentUser.id)}`,
+        { signal: controller.signal }
       );
       if (!res.ok) return;
 
@@ -685,6 +801,76 @@ export class NetworkingService extends EventEmitter {
       }
     } catch (err) {
       // Silently ignore — signaling is a supplementary discovery method
+    } finally {
+      clearTimeout(timeout);
     }
+  }
+
+  // ── Network Change Detection ────────────────────────────────
+
+  /**
+   * Polls for IP address changes. When the active network interface changes
+   * (e.g., WiFi switch), triggers a full networking restart.
+   */
+  private startNetworkChangeDetection() {
+    this.networkCheckTimer = setInterval(() => {
+      const currentAddresses = this.getLocalAddresses();
+      const addressesChanged = !this.arraysEqual(currentAddresses, this.lastKnownAddresses);
+
+      if (addressesChanged) {
+        const hadAddresses = this.lastKnownAddresses.length > 0;
+        const hasAddresses = currentAddresses.length > 0;
+
+        if (hadAddresses && hasAddresses) {
+          // Network interface changed (WiFi switch)
+          console.log(
+            `Network change detected: ${this.lastKnownAddresses.join(',')} → ${currentAddresses.join(',')}`
+          );
+          this.restart();
+        } else if (!hadAddresses && hasAddresses) {
+          // Network came back online
+          console.log('Network came online:', currentAddresses.join(','));
+          this.restart();
+        } else if (hadAddresses && !hasAddresses) {
+          // Network went offline — mark all peers as lost
+          console.log('Network went offline');
+          this.lastKnownAddresses = currentAddresses;
+          for (const [userId, socket] of this.connections) {
+            socket.destroy();
+            this.emit('peerLost', userId);
+          }
+          this.connections.clear();
+          this.peers.clear();
+          this.peerLastActivity.clear();
+        }
+      }
+    }, NETWORK_CHECK_INTERVAL);
+  }
+
+  private arraysEqual(a: string[], b: string[]): boolean {
+    if (a.length !== b.length) return false;
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((val, idx) => val === sortedB[idx]);
+  }
+
+  // ── Profile Validation ──────────────────────────────────────
+
+  /**
+   * Validates that an incoming user profile has all required fields.
+   * Returns the user if valid, null otherwise.
+   */
+  private validateUserProfile(data: unknown): User | null {
+    if (!data || typeof data !== 'object') return null;
+    const u = data as Record<string, unknown>;
+    if (typeof u.id !== 'string' || !u.id) return null;
+    if (typeof u.name !== 'string' || !u.name) return null;
+    if (typeof u.username !== 'string' || !u.username) return null;
+    if (typeof u.status !== 'string') return null;
+    // Reject oversized avatar data (> 500KB base64 ≈ ~375KB image)
+    if (typeof u.avatarImageData === 'string' && u.avatarImageData.length > 500000) {
+      u.avatarImageData = undefined;
+    }
+    return data as User;
   }
 }

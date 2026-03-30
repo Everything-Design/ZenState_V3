@@ -234,11 +234,36 @@ function startNetworking(user: User) {
   });
 
   networking.start();
+
+  // Handle system sleep/wake — network interfaces change after resume
+  powerMonitor.removeAllListeners('suspend');
+  powerMonitor.removeAllListeners('resume');
+
+  powerMonitor.on('suspend', () => {
+    console.log('System suspending — network connections will go stale');
+  });
+
+  powerMonitor.on('resume', () => {
+    console.log('System resumed — triggering network restart');
+    networking?.handleSystemResume();
+  });
 }
 
 function broadcastToWindows(channel: string, data: unknown) {
-  popoverWindow?.webContents.send(channel, data);
-  dashboardWindow?.webContents.send(channel, data);
+  try {
+    if (popoverWindow && !popoverWindow.isDestroyed()) {
+      popoverWindow.webContents.send(channel, data);
+    }
+  } catch (err) {
+    console.warn(`Failed to send ${channel} to popover:`, err);
+  }
+  try {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      dashboardWindow.webContents.send(channel, data);
+    }
+  } catch (err) {
+    console.warn(`Failed to send ${channel} to dashboard:`, err);
+  }
 }
 
 // ── Meeting Alerts ─────────────────────────────────────────────
