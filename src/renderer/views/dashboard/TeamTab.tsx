@@ -1,5 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, AvailabilityStatus, IPC } from '../../../shared/types';
+import { Megaphone, X } from 'lucide-react';
+import { User, AvailabilityStatus, IPC, ReceivedPing } from '../../../shared/types';
+import SendPingSheet from '../../components/SendPingSheet';
 
 interface Props {
   currentUser: User;
@@ -38,6 +40,30 @@ export default function TeamTab({ currentUser, peers }: Props) {
   const [sentConfirms, setSentConfirms] = useState<Record<string, boolean>>({});
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [showPingSheet, setShowPingSheet] = useState(false);
+  const [recentPings, setRecentPings] = useState<ReceivedPing[]>([]);
+
+  useEffect(() => {
+    window.zenstate.teamGetRecentPings().then(setRecentPings).catch(() => {});
+    const onPing = (...args: unknown[]) => {
+      setRecentPings((prev) => [args[0] as ReceivedPing, ...prev].slice(0, 20));
+    };
+    window.zenstate.on(IPC.TEAM_PING_RECEIVED, onPing);
+    return () => { window.zenstate.removeAllListeners(IPC.TEAM_PING_RECEIVED); };
+  }, []);
+
+  async function dismissPing(id: string) {
+    const next = await window.zenstate.teamDismissPing(id).catch(() => null);
+    if (next) setRecentPings(next);
+  }
+
+  function formatRelativeTs(iso: string): string {
+    const ago = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (ago < 60) return 'just now';
+    if (ago < 3600) return `${Math.round(ago / 60)}m ago`;
+    if (ago < 86400) return `${Math.round(ago / 3600)}h ago`;
+    return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
 
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
@@ -141,7 +167,54 @@ export default function TeamTab({ currentUser, peers }: Props) {
         }}>
           {presenceCounts.total} online
         </span>
+        <div className="spacer" style={{ flex: 1 }} />
+        <button
+          className="btn btn-primary"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          onClick={() => setShowPingSheet(true)}
+          title="Send a quick heads-up to teammates"
+        >
+          <Megaphone size={14} /> Send a heads-up
+        </button>
       </div>
+
+      {/* Recent pings */}
+      {recentPings.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--zen-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Megaphone size={13} style={{ color: 'var(--zen-primary)' }} /> Recent pings
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {recentPings.slice(0, 5).map((p) => (
+              <div key={p.id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                padding: '10px 12px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--zen-tertiary-bg)',
+                border: '1px solid var(--zen-divider)',
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, color: 'var(--zen-text)', lineHeight: 1.4 }}>{p.message}</div>
+                  <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginTop: 3, display: 'flex', gap: 6 }}>
+                    <span style={{ fontWeight: 500, color: 'var(--zen-secondary-text)' }}>{p.senderName}</span>
+                    <span>·</span>
+                    <span>{formatRelativeTs(p.timestamp)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => dismissPing(p.id)}
+                  title="Dismiss"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--zen-tertiary-text)', display: 'flex', padding: 4, borderRadius: 4 }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--zen-text)'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--zen-tertiary-text)'}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Presence Summary */}
       <div className="card" style={{ display: 'flex', gap: 24, padding: '12px 16px' }}>
@@ -367,6 +440,10 @@ export default function TeamTab({ currentUser, peers }: Props) {
           ))
         )}
       </div>
+
+      {showPingSheet && (
+        <SendPingSheet peers={peers} onClose={() => setShowPingSheet(false)} />
+      )}
     </div>
   );
 }

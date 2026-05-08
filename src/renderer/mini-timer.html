@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZenState — Timer</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent !important;
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    /* Pre-React fallback: dark rounded pill so the window is visible the
+       instant `show()` is called. React's component mounts on top with the
+       same shape so there's no flash. We deliberately don't use macOS'
+       -webkit-app-region: drag because it swallows mousedown at the OS
+       level and breaks click-to-expand. Drag is implemented in JS via
+       mouse events that send delta updates to the main process. */
+    #root {
+      width: 100vw;
+      height: 100vh;
+      box-sizing: border-box;
+      background: rgba(20, 22, 26, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./mini-timer-main.tsx"></script>
+</body>
+</html>

@@ -10,3 +10,6 @@ dist/
 .DS_Store
 .vite/
 scripts/keys/
+.swarm/
+ruvector.db
+ZenState_V3/

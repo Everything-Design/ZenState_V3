@@ -2,7 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Pencil, Trash2, FileText } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
-import { getCategoryColor, categoryTagStyle } from '../../utils/categoryColors';
+// Plain neutral tag for legacy session.category data — no per-category colors anymore.
+const plainCategoryTagStyle: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '1px 7px',
+  borderRadius: 6,
+  fontSize: 10,
+  fontWeight: 500,
+  background: 'var(--zen-tertiary-bg)',
+  border: '1px solid var(--zen-divider)',
+  color: 'var(--zen-secondary-text)',
+};
 import { ProBadge } from '../../components/ProGate';
 
 interface Props {
@@ -57,8 +67,6 @@ function formatDateLabel(dateStr: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
-// Category colors are now loaded from persistence via getCategoryColor()
-
 export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props) {
   const [statPeriod, setStatPeriod] = useState<StatPeriod>('today');
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
@@ -66,17 +74,6 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
   const [showCalendar, setShowCalendar] = useState(true);
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
-      setCategories(cats || []);
-    }).catch(() => {});
-    (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
-      setCategoryColors(colors || {});
-    }).catch(() => {});
-  }, []);
 
   // Filter records by period
   const filteredRecords = useMemo(() => {
@@ -164,26 +161,13 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
     setCalendarMonth(next);
   }
 
-  async function handleExportCSV() {
-    const monthStr = getMonthStr(calendarMonth);
-    const csv = await window.zenstate.exportCSV(monthStr);
-    // Create a download link
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `ZenState_Timesheet_${monthStr}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
   async function handleDeleteSession(sessionId: string, date: string) {
     await window.zenstate.deleteSession(sessionId, date);
     onRefreshRecords();
     setDeleteConfirm(null);
   }
 
-  async function handleSaveEdit(sessionId: string, date: string, updates: { taskLabel: string; category: string; duration: number; notes: string }) {
+  async function handleSaveEdit(sessionId: string, date: string, updates: { taskLabel: string; duration: number; notes: string; basecamp?: unknown }) {
     await window.zenstate.updateSession(sessionId, date, updates);
     onRefreshRecords();
     setEditingSession(null);
@@ -259,34 +243,6 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
           </div>
         </div>
 
-        {/* Time by Category */}
-        {stats.categories.length > 0 && (
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Time by Category</div>
-            {stats.categories.map((cat) => (
-              <div key={cat.name} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <div style={{ width: 80, fontSize: 11, color: 'var(--zen-secondary-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {cat.name}
-                </div>
-                <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--zen-tertiary-bg)', overflow: 'hidden' }}>
-                  <div style={{
-                    height: '100%',
-                    width: `${cat.percentage}%`,
-                    background: getCategoryColor(cat.name, categoryColors, categories),
-                    borderRadius: 3,
-                    transition: 'width 0.3s ease',
-                  }} />
-                </div>
-                <div style={{ width: 60, fontSize: 10, color: 'var(--zen-secondary-text)', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                  {formatTime(cat.time)}
-                </div>
-                <div style={{ width: 35, fontSize: 10, color: 'var(--zen-tertiary-text)', textAlign: 'right' }}>
-                  {Math.round(cat.percentage)}%
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Today's Sessions */}
@@ -300,34 +256,6 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
           )}
         </div>
 
-        {/* Today's category summary */}
-        {todayCategoryBreakdown.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {todayCategoryBreakdown.map((cat) => (
-              <div key={cat.name} style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 10,
-                padding: '3px 8px',
-                borderRadius: 8,
-                background: 'var(--zen-tertiary-bg)',
-              }}>
-                <div style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: getCategoryColor(cat.name, categoryColors, categories),
-                }} />
-                <span style={{ color: 'var(--zen-secondary-text)' }}>{cat.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--zen-tertiary-text)' }}>
-                  {formatDuration(cat.time)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
         {todaySessions.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 20, color: 'var(--zen-tertiary-text)', fontSize: 12 }}>
             No recordings yet today
@@ -339,7 +267,7 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                 <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                   {session.taskLabel}
                   {session.category && (
-                    <span style={categoryTagStyle(getCategoryColor(session.category, categoryColors, categories))}>
+                    <span style={plainCategoryTagStyle}>
                       {session.category}
                     </span>
                   )}
@@ -394,23 +322,13 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
         )}
       </div>
 
-      {/* CSV Export */}
+      {/* Calendar month nav */}
       <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <button className="btn btn-secondary" onClick={() => navigateMonth(-1)}>◀</button>
         <span style={{ fontSize: 13, fontWeight: 600 }}>
           {calendarMonth.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
         </span>
         <button className="btn btn-secondary" onClick={() => navigateMonth(1)}>▶</button>
-        <div className="spacer" />
-        <button
-          className="btn btn-primary"
-          onClick={handleExportCSV}
-          disabled={!isPro}
-          title={!isPro ? 'Pro feature — upgrade to export CSV' : undefined}
-          style={!isPro ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
-        >
-          📥 Export CSV {!isPro && <ProBadge />}
-        </button>
       </div>
 
       {/* Calendar */}
@@ -533,7 +451,7 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                     <div style={{ fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
                       {session.taskLabel}
                       {session.category && (
-                        <span style={categoryTagStyle(getCategoryColor(session.category, categoryColors, categories))}>
+                        <span style={plainCategoryTagStyle}>
                           {session.category}
                         </span>
                       )}
@@ -598,7 +516,6 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
         <SessionEditModal
           session={editingSession.session}
           date={editingSession.date}
-          categories={categories}
           onSave={handleSaveEdit}
           onClose={() => setEditingSession(null)}
         />

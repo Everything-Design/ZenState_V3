@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import AlertView from './views/AlertView';
 
 interface AlertData {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'adminNotification';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'longRunGuard' | 'timesheetConfirm';
   from: string;
   senderId: string;
   message?: string;
   accepted?: boolean;
   targetDuration?: number;
+  elapsedSeconds?: number;
+  lastActivityAt?: string;
 }
 
 export default function AlertApp() {
@@ -35,12 +37,20 @@ export default function AlertApp() {
       message={alertData.message}
       accepted={alertData.accepted}
       targetDuration={alertData.targetDuration}
+      elapsedSeconds={alertData.elapsedSeconds}
+      lastActivityAt={alertData.lastActivityAt}
       onRespond={(accepted, message) => {
         window.zenstate.respondMeetingRequest(alertData.senderId, accepted, message);
         window.close();
       }}
       onDismiss={() => {
         window.close();
+      }}
+      onLongRunResponse={(action, stopAtIso) => {
+        window.zenstate.timerLongRunRespond({ action, stopAtIso });
+      }}
+      onTimesheetConfirm={(action, hours, notes) => {
+        window.zenstate.timerTimesheetConfirm({ action, hours, notes });
       }}
     />
   );

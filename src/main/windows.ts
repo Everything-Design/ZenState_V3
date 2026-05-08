@@ -5,8 +5,8 @@ const isMac = process.platform === 'darwin';
 
 export function createPopoverWindow(url: string): BrowserWindow {
   const win = new BrowserWindow({
-    width: 320,
-    height: 450,
+    width: 360,
+    height: 480,
     show: false,
     frame: false,
     resizable: false,
@@ -16,6 +16,10 @@ export function createPopoverWindow(url: string): BrowserWindow {
     fullscreenable: false,
     skipTaskbar: true,
     transparent: isMac,
+    // `type: 'panel'` makes this an NSPanel on macOS — non-activating so it
+    // doesn't steal focus from the underlying app, and it floats correctly
+    // over full-screen Spaces (hover-to-dismiss bug fix).
+    ...(isMac ? { type: 'panel' as const } : {}),
     ...(isMac
       ? { vibrancy: 'sidebar' as const, visualEffectState: 'active' as const }
       : { backgroundColor: '#1c1c1e' }),
@@ -27,9 +31,12 @@ export function createPopoverWindow(url: string): BrowserWindow {
     },
   });
 
-  // Show on all desktops/spaces so the popover doesn't pull focus to the main desktop
   if (isMac) {
+    // Show on all spaces and stay visible above full-screen apps.
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // 'screen-saver' is the highest standard window level — keeps the popover
+    // above full-screen app windows, which sit at the 'main-menu' level.
+    win.setAlwaysOnTop(true, 'screen-saver');
   }
 
   win.loadURL(url);
@@ -39,10 +46,16 @@ export function createPopoverWindow(url: string): BrowserWindow {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
-  // Hide when clicking outside
+  // Hide when the user clicks outside, but ignore the spurious blur that
+  // can fire immediately after `show()` while the underlying full-screen
+  // Space is still settling. A short grace window prevents the popover
+  // from instantly disappearing the first time it's opened on top of a
+  // full-screen app.
+  let lastShownAt = 0;
+  win.on('show', () => { lastShownAt = Date.now(); });
   win.on('blur', () => {
-    // Don't hide if devtools is focused (dev mode)
-    if (!require('electron').app.isPackaged) return;
+    if (!require('electron').app.isPackaged) return; // devtools focus in dev
+    if (Date.now() - lastShownAt < 250) return;       // ignore show→blur race
     win.hide();
   });
 
@@ -72,6 +85,66 @@ export function createDashboardWindow(url: string): BrowserWindow {
     win.webContents.openDevTools({ mode: 'detach' });
   }
 
+  return win;
+}
+
+// A small frameless pill that floats above all other windows — including
+// full-screen apps — so the user always sees whether their timer is running.
+// `type: 'panel'` is critical here: regular BrowserWindows on macOS don't
+// reliably stay above full-screen Spaces even with `setVisibleOnAllWorkspaces`
+// + `screen-saver` level. NSPanel does. The opaque CSS background in
+// mini-timer.html acts as a fallback so the panel renders reliably even
+// before React mounts (the documented edge case for transparent panels).
+export function createMiniTimerWindow(url: string, position?: { x: number; y: number }): BrowserWindow {
+  const width = 240;
+  const height = 36;
+  const win = new BrowserWindow({
+    width,
+    height,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000', // explicit ARGB so transparent compositing is reliable
+    alwaysOnTop: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: true,
+    paintWhenInitiallyHidden: true,
+    ...(isMac ? { type: 'panel' as const } : {}),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  if (isMac) {
+    // Stay visible across Spaces and over full-screen apps. The order matters:
+    // setVisibleOnAllWorkspaces first, then bump the always-on-top level.
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    win.setAlwaysOnTop(true, 'screen-saver');
+  } else {
+    win.setAlwaysOnTop(true);
+  }
+
+  // Default position: top-right of primary display, 60px below the work area
+  // top edge so it clears the menu bar and notch area on MacBooks.
+  if (position) {
+    win.setPosition(position.x, position.y);
+  } else {
+    const { screen } = require('electron');
+    const display = screen.getPrimaryDisplay();
+    const x = display.workArea.x + display.workArea.width - width - 20;
+    const y = display.workArea.y + 60;
+    win.setPosition(x, y);
+  }
+
+  win.loadURL(url);
   return win;
 }
 

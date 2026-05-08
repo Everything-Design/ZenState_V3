@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Timer, ClipboardList, Settings, MessageCircle, Wifi } from 'lucide-react';
+import { Users, ClipboardList, Settings, MessageCircle, Briefcase, Sun } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord, LicenseState } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
-import TimerTab from './dashboard/TimerTab';
 import TimesheetTab from './dashboard/TimesheetTab';
 import SettingsTab from './dashboard/SettingsTab';
-import NetworkTab from './dashboard/NetworkTab';
+import ProjectsTab from './dashboard/ProjectsTab';
+import TodayTab from './dashboard/TodayTab';
 
 interface TimerState {
   elapsed: number;
@@ -58,7 +58,7 @@ function getStatusLabel(status: AvailabilityStatus): string {
   }
 }
 
-type Tab = 'team' | 'timer' | 'timesheet' | 'settings' | 'network';
+type Tab = 'today' | 'team' | 'timesheet' | 'projects' | 'settings';
 
 function formatRevertTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -68,10 +68,10 @@ function formatRevertTime(seconds: number): string {
 }
 
 export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, requestedTab, isPro, licenseState, onLicenseStateChange, onRequestedTabHandled, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('team');
+  const [activeTab, setActiveTab] = useState<Tab>('today');
 
   useEffect(() => {
-    if (requestedTab && ['team', 'timer', 'timesheet', 'settings', 'network'].includes(requestedTab)) {
+    if (requestedTab && ['today', 'team', 'timesheet', 'projects', 'settings'].includes(requestedTab)) {
       setActiveTab(requestedTab as Tab);
       onRequestedTabHandled?.();
     }
@@ -278,16 +278,16 @@ export default function DashboardView({ currentUser, peers, timerState, records,
         {/* Navigation */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <button
+            className={`tab-btn ${activeTab === 'today' ? 'active' : ''}`}
+            onClick={() => setActiveTab('today')}
+          >
+            <Sun size={16} /> Today
+          </button>
+          <button
             className={`tab-btn ${activeTab === 'team' ? 'active' : ''}`}
             onClick={() => setActiveTab('team')}
           >
             <Users size={16} /> Team
-          </button>
-          <button
-            className={`tab-btn ${activeTab === 'timer' ? 'active' : ''}`}
-            onClick={() => setActiveTab('timer')}
-          >
-            <Timer size={16} /> Timer
           </button>
           <button
             className={`tab-btn ${activeTab === 'timesheet' ? 'active' : ''}`}
@@ -296,10 +296,10 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             <ClipboardList size={16} /> Timesheet
           </button>
           <button
-            className={`tab-btn ${activeTab === 'network' ? 'active' : ''}`}
-            onClick={() => setActiveTab('network')}
+            className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
+            onClick={() => setActiveTab('projects')}
           >
-            <Wifi size={16} /> Network
+            <Briefcase size={16} /> Projects
           </button>
           <button
             className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
@@ -316,16 +316,15 @@ export default function DashboardView({ currentUser, peers, timerState, records,
       <div className="dashboard-content">
         {/* Drag strip at top for window dragging */}
         <div className="drag-strip" />
-        {activeTab === 'team' && (
-          <TeamTab currentUser={currentUser} peers={peers} />
-        )}
-        {activeTab === 'timer' && (
-          <TimerTab
+        {activeTab === 'today' && (
+          <TodayTab
             timerState={timerState}
             records={records}
-            isPro={isPro}
-            onRefreshRecords={onRefreshRecords}
+            onOpenSettings={() => setActiveTab('settings')}
           />
+        )}
+        {activeTab === 'team' && (
+          <TeamTab currentUser={currentUser} peers={peers} />
         )}
         {activeTab === 'timesheet' && (
           <TimesheetTab
@@ -334,8 +333,11 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             onRefreshRecords={onRefreshRecords}
           />
         )}
-        {activeTab === 'network' && (
-          <NetworkTab />
+        {activeTab === 'projects' && (
+          <ProjectsTab
+            timerState={timerState}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
         )}
         {activeTab === 'settings' && (
           <SettingsTab

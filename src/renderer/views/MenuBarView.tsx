@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass } from 'lucide-react';
-import { User, AvailabilityStatus, IPC, FocusTemplate, AppSettings, DailyRecord, LicenseState } from '../../shared/types';
+import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
+import { User, AvailabilityStatus, IPC, LicenseState, RecentTodo, TodayPlan, PinnedTodo, ReceivedPing } from '../../shared/types';
+import SendPingSheet from '../components/SendPingSheet';
 
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
 const DURATION_OPTIONS = [
@@ -38,6 +39,7 @@ interface Props {
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onOpenSettings?: () => void;
+  onOpenProjects?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -78,14 +80,21 @@ function formatRevertTime(seconds: number): string {
   return `${s}s`;
 }
 
-export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
+// "5m ago", "1h ago", "yesterday" — for short relative timestamps in the
+// recent-pings list. Anything older than 24h shouldn't appear (TTL cleanup
+// in main process), but defensive fallback included.
+function formatRelative(iso: string): string {
+  const ago = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (ago < 60) return 'just now';
+  if (ago < 3600) return `${Math.round(ago / 60)}m ago`;
+  if (ago < 86400) return `${Math.round(ago / 3600)}h ago`;
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings, onOpenProjects }: Props) {
   const [searchText, setSearchText] = useState('');
   const [showTimerInput, setShowTimerInput] = useState(false);
   const [timerTaskInput, setTimerTaskInput] = useState('');
-  const [timerCategory, setTimerCategory] = useState('');
-  const [timerMode, setTimerMode] = useState<'stopwatch' | 'countdown'>('stopwatch');
-  const [selectedDuration, setSelectedDuration] = useState(25 * 60);
-  const [customMinutes, setCustomMinutes] = useState('');
   const [showStatusMessage, setShowStatusMessage] = useState(false);
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
@@ -93,38 +102,82 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [showRevertPicker, setShowRevertPicker] = useState(false);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [templates, setTemplates] = useState<FocusTemplate[]>([]);
-  const [dailyGoalSeconds, setDailyGoalSeconds] = useState(0);
-  const [todayTotal, setTodayTotal] = useState(0);
+  const [recents, setRecents] = useState<RecentTodo[]>([]);
+  const [todayPlan, setTodayPlan] = useState<TodayPlan | null>(null);
+  // Two modes for the popover body: "today" (your plan) vs "team" (peer presence).
+  // Default to Today since that's the daily-ritual surface. A useEffect below
+  // falls through to Team on first open if there are no pinned to-dos but peers
+  // are around.
+  const [popoverTab, setPopoverTab] = useState<'today' | 'team'>('today');
+  const [tabAutoChosen, setTabAutoChosen] = useState(false);
+  const [showPingSheet, setShowPingSheet] = useState(false);
+  const [recentPings, setRecentPings] = useState<ReceivedPing[]>([]);
 
+  // Load recent Basecamp todos when the timer input opens, so the user can
+  // one-tap restart a recent task without drilling Project → List → Todo.
   useEffect(() => {
-    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
-      setCategories(cats || []);
-    }).catch(() => {});
-    (window as any).zenstate.getTemplates?.().then((t: FocusTemplate[]) => {
-      setTemplates(t || []);
-    }).catch(() => {});
-    (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
-      setDailyGoalSeconds(s?.dailyFocusGoalSeconds || 0);
-    }).catch(() => {});
-    (window as any).zenstate.getRecords?.().then((records: DailyRecord[]) => {
-      const d = new Date();
-      const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      const todayRec = records?.find((r: DailyRecord) => r.date.startsWith(todayStr));
-      setTodayTotal(todayRec?.totalFocusTime || 0);
-    }).catch(() => {});
+    if (showTimerInput) {
+      (window as any).zenstate.recentsGet?.().then((rs: RecentTodo[]) => setRecents(rs ?? [])).catch(() => {});
+    }
+  }, [showTimerInput]);
 
-    // Listen for settings changes from dashboard
-    (window as any).zenstate.on('settings:updated', (settings: unknown) => {
-      const s = settings as AppSettings;
-      setDailyGoalSeconds(s?.dailyFocusGoalSeconds || 0);
-    });
-
-    return () => {
-      (window as any).zenstate.removeAllListeners?.('settings:updated');
-    };
+  // Load Today's plan and stay subscribed to changes so the popover shows
+  // pinned to-dos as soon as the user pins/unpins from the Dashboard.
+  useEffect(() => {
+    (window as any).zenstate.todayGet?.().then((res: { plan: TodayPlan }) => setTodayPlan(res?.plan ?? null)).catch(() => {});
+    const onChanged = (...args: unknown[]) => setTodayPlan(args[0] as TodayPlan);
+    window.zenstate.on('today:changed', onChanged);
+    return () => { window.zenstate.removeAllListeners('today:changed'); };
   }, []);
+
+  // First-load default: if Today is empty but peers are around, open on Team.
+  // After the user has manually picked a tab, we leave their choice alone.
+  useEffect(() => {
+    if (tabAutoChosen) return;
+    if (!todayPlan) return; // still loading
+    if (todayPlan.items.length === 0 && peers.length > 0) {
+      setPopoverTab('team');
+    }
+    setTabAutoChosen(true);
+  }, [todayPlan, peers.length, tabAutoChosen]);
+
+  // Recent received pings — load on mount and stay subscribed for new ones.
+  useEffect(() => {
+    window.zenstate.teamGetRecentPings().then(setRecentPings).catch(() => {});
+    const onPing = (...args: unknown[]) => {
+      const ping = args[0] as ReceivedPing;
+      setRecentPings((prev) => [ping, ...prev].slice(0, 20));
+    };
+    window.zenstate.on(IPC.TEAM_PING_RECEIVED, onPing);
+    return () => { window.zenstate.removeAllListeners(IPC.TEAM_PING_RECEIVED); };
+  }, []);
+
+  async function dismissPing(id: string) {
+    const next = await window.zenstate.teamDismissPing(id).catch(() => null);
+    if (next) setRecentPings(next);
+  }
+
+  function handleStartFromPinned(p: PinnedTodo) {
+    window.zenstate.startTimer(p.content, undefined, undefined, {
+      accountId: p.accountId,
+      projectId: p.projectId,
+      todoId: p.todoId,
+      todoListId: p.todoListId,
+      projectName: p.projectName,
+    });
+  }
+
+  function handleStartFromRecent(r: RecentTodo) {
+    window.zenstate.startTimer(r.content, undefined, undefined, {
+      accountId: r.accountId,
+      projectId: r.projectId,
+      todoId: r.todoId,
+      todoListId: r.todoListId,
+      projectName: r.projectName,
+    });
+    setShowTimerInput(false);
+    setTimerTaskInput('');
+  }
 
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
@@ -170,21 +223,11 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
 
-  const MENU_DURATION_PRESETS = [
-    { label: '15m', seconds: 15 * 60 },
-    { label: '25m', seconds: 25 * 60 },
-    { label: '45m', seconds: 45 * 60 },
-    { label: '1h', seconds: 60 * 60 },
-  ];
-
   function handleStartTimer() {
-    if (!timerCategory) return;
-    const label = timerTaskInput.trim() || timerCategory;
-    const target = timerMode === 'countdown' ? selectedDuration : undefined;
-    window.zenstate.startTimer(label, timerCategory, target);
+    const label = timerTaskInput.trim();
+    if (!label) return; // task label is now the only required field
+    window.zenstate.startTimer(label);
     setTimerTaskInput('');
-    setTimerCategory('');
-    setCustomMinutes('');
     setShowTimerInput(false);
   }
 
@@ -322,7 +365,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
 
           <input
             className="text-input"
-            placeholder="Task name (optional)"
+            placeholder="What are you working on?"
             value={timerTaskInput}
             onChange={(e) => setTimerTaskInput(e.target.value)}
             autoFocus
@@ -331,114 +374,44 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             }}
           />
 
-          {/* Focus Templates (Pro only) */}
-          {templates.length > 0 && isPro && (
+          {/* Recents — one-tap restart of recently-used Basecamp todos */}
+          {recents.length > 0 && (
             <div>
-              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Templates</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {templates.map((t) => (
+              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600, marginBottom: 6 }}>
+                Recent
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {recents.slice(0, 5).map((r) => (
                   <button
-                    key={t.id}
-                    onClick={() => {
-                      window.zenstate.startTimer(t.name, t.category, t.defaultDuration);
-                      setShowTimerInput(false);
-                    }}
+                    key={r.todoId}
+                    onClick={() => handleStartFromRecent(r)}
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      padding: '3px 10px',
-                      borderRadius: 14,
-                      background: 'var(--zen-secondary-bg)',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--zen-tertiary-bg)',
                       border: '1px solid var(--zen-divider)',
-                      cursor: 'pointer',
-                      fontSize: 10,
                       color: 'var(--zen-text)',
+                      fontSize: 'var(--text-sm)',
                       fontFamily: 'inherit',
-                      transition: 'background 0.15s ease, border-color 0.15s ease',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard)',
                     }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'var(--zen-primary)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-secondary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-tertiary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
                   >
-                    <span style={{ fontWeight: 500 }}>{t.name}</span>
-                    <span style={{ color: 'var(--zen-tertiary-text)' }}>{formatDuration(t.defaultDuration)}</span>
+                    <Play size={11} style={{ color: 'var(--status-available)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.content}</div>
+                      {r.projectName && (
+                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                          {r.projectName}
+                        </div>
+                      )}
+                    </div>
                   </button>
                 ))}
-              </div>
-            </div>
-          )}
-
-          {/* Category Picker */}
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category</div>
-            <div className="category-picker">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  className={`category-chip ${timerCategory === cat ? 'selected' : ''}`}
-                  onClick={() => setTimerCategory(timerCategory === cat ? '' : cat)}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Mode Toggle */}
-          <div style={{ display: 'flex', gap: 4, background: 'var(--zen-tertiary-bg)', borderRadius: 6, padding: 2 }}>
-            <button
-              style={{
-                flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 600, borderRadius: 4,
-                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                background: timerMode === 'stopwatch' ? 'var(--zen-primary)' : 'transparent',
-                color: timerMode === 'stopwatch' ? 'white' : 'var(--zen-secondary-text)',
-              }}
-              onClick={() => setTimerMode('stopwatch')}
-            >
-              Stopwatch
-            </button>
-            <button
-              style={{
-                flex: 1, padding: '4px 0', fontSize: 10, fontWeight: 600, borderRadius: 4,
-                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                background: timerMode === 'countdown' ? 'var(--zen-primary)' : 'transparent',
-                color: timerMode === 'countdown' ? 'white' : 'var(--zen-secondary-text)',
-              }}
-              onClick={() => setTimerMode('countdown')}
-            >
-              <Hourglass size={10} style={{ marginRight: 2, verticalAlign: 'middle' }} /> Countdown
-            </button>
-          </div>
-
-          {/* Duration Picker (countdown mode) */}
-          {timerMode === 'countdown' && (
-            <div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {MENU_DURATION_PRESETS.map((preset) => (
-                  <button
-                    key={preset.label}
-                    className={`category-chip ${selectedDuration === preset.seconds ? 'selected' : ''}`}
-                    onClick={() => { setSelectedDuration(preset.seconds); setCustomMinutes(''); }}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 4, marginTop: 6, alignItems: 'center' }}>
-                <input
-                  className="text-input"
-                  placeholder="Custom..."
-                  type="number"
-                  min="1"
-                  value={customMinutes}
-                  onChange={(e) => {
-                    setCustomMinutes(e.target.value);
-                    const mins = parseInt(e.target.value);
-                    if (mins > 0) setSelectedDuration(mins * 60);
-                  }}
-                  style={{ flex: 1, fontSize: 11 }}
-                />
-                <span style={{ fontSize: 10, color: 'var(--zen-tertiary-text)' }}>min</span>
               </div>
             </div>
           )}
@@ -446,7 +419,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           <div className="hstack" style={{ gap: 8 }}>
             <button
               className="btn btn-secondary"
-              onClick={() => { setShowTimerInput(false); setTimerTaskInput(''); setTimerCategory(''); setCustomMinutes(''); }}
+              onClick={() => { setShowTimerInput(false); setTimerTaskInput(''); }}
             >
               Cancel
             </button>
@@ -454,9 +427,9 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
             <button
               className="btn btn-primary"
               onClick={handleStartTimer}
-              disabled={!timerCategory}
+              disabled={!timerTaskInput.trim()}
             >
-              {timerMode === 'countdown' ? `Start ${formatDuration(selectedDuration)}` : 'Start'}
+              Start
             </button>
           </div>
         </div>
@@ -616,6 +589,182 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         </div>
       )}
 
+      {/* Tab bar — segmented control switching the body between Today and Team.
+          Status (above) applies to both modes globally; the active timer banner (above)
+          stays visible across tabs as important context. */}
+      <div style={{ padding: '8px 16px 4px' }}>
+        <div style={{
+          display: 'flex',
+          background: 'var(--zen-tertiary-bg)',
+          border: '1px solid var(--zen-divider)',
+          borderRadius: 'var(--radius-sm)',
+          padding: 2,
+          gap: 2,
+        }}>
+          <button
+            onClick={() => setPopoverTab('today')}
+            style={{
+              flex: 1,
+              padding: '5px 0',
+              borderRadius: 6,
+              border: 'none',
+              background: popoverTab === 'today' ? 'rgba(10, 132, 255, 0.16)' : 'transparent',
+              color: popoverTab === 'today' ? 'var(--zen-primary)' : 'var(--zen-secondary-text)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              transition: 'background var(--duration-quick) var(--ease-standard), color var(--duration-quick) var(--ease-standard)',
+            }}
+          >
+            Today{todayPlan && todayPlan.items.length > 0 ? ` · ${todayPlan.items.length}` : ''}
+          </button>
+          <button
+            onClick={() => setPopoverTab('team')}
+            style={{
+              flex: 1,
+              padding: '5px 0',
+              borderRadius: 6,
+              border: 'none',
+              background: popoverTab === 'team' ? 'rgba(10, 132, 255, 0.16)' : 'transparent',
+              color: popoverTab === 'team' ? 'var(--zen-primary)' : 'var(--zen-secondary-text)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              transition: 'background var(--duration-quick) var(--ease-standard), color var(--duration-quick) var(--ease-standard)',
+            }}
+          >
+            Team{presenceCounts.total > 0 ? ` · ${presenceCounts.total}` : ''}
+          </button>
+        </div>
+      </div>
+
+      {/* TODAY tab content */}
+      {popoverTab === 'today' && (
+      <>
+      {todayPlan && todayPlan.items.length > 0 ? (
+        <div style={{ padding: '6px 16px 0', flex: 1, overflowY: 'auto' }}>
+          {todayPlan.items.length > 3 && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+              <button
+                onClick={() => { window.zenstate.openDashboard('today'); window.zenstate.closePopover(); }}
+                style={{ background: 'transparent', border: 'none', color: 'var(--zen-tertiary-text)', fontSize: 'var(--text-xs)', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+              >
+                +{todayPlan.items.length - 3} more in Dashboard →
+              </button>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {todayPlan.items.slice(0, 3).map((p) => {
+              const running = isTimerActive && timerState.taskLabel === p.content;
+              return (
+                <div
+                  key={p.todoId}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: running ? 'rgba(48, 209, 88, 0.08)' : 'var(--zen-tertiary-bg)',
+                    border: `1px solid ${running ? 'rgba(48, 209, 88, 0.25)' : 'var(--zen-divider)'}`,
+                    transition: 'background var(--duration-quick) var(--ease-standard)',
+                  }}
+                >
+                  <div style={{
+                    width: 8, height: 8, borderRadius: '50%',
+                    background: running ? 'var(--status-available)' : 'transparent',
+                    border: running ? 'none' : '1.5px solid var(--zen-tertiary-text)',
+                    flexShrink: 0,
+                    boxShadow: running ? '0 0 6px rgba(48, 209, 88, 0.5)' : 'none',
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.content}
+                    </div>
+                    {p.projectName && (
+                      <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                        {p.projectName}
+                      </div>
+                    )}
+                  </div>
+                  {running ? (
+                    <button onClick={() => window.zenstate.stopTimer()} title="Stop"
+                      style={{ background: 'rgba(255,149,0,0.18)', border: '1px solid rgba(255,149,0,0.32)', color: 'var(--status-occupied)', cursor: 'pointer', padding: '4px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0 }}>
+                      Stop
+                    </button>
+                  ) : (
+                    <button onClick={() => handleStartFromPinned(p)} title="Start timer"
+                      disabled={isTimerActive}
+                      style={{ background: 'var(--zen-primary)', border: 'none', color: 'white', cursor: isTimerActive ? 'not-allowed' : 'pointer', opacity: isTimerActive ? 0.4 : 1, padding: '4px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <Play size={9} /> Start
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: '24px 16px', textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+          <Briefcase size={20} style={{ color: 'var(--zen-tertiary-text)' }} />
+          <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-secondary-text)', lineHeight: 'var(--leading-relaxed)', maxWidth: 240 }}>
+            No to-dos pinned for today.<br />Plan your day in the Dashboard.
+          </div>
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 'var(--text-sm)' }}
+            onClick={() => { window.zenstate.openDashboard('today'); window.zenstate.closePopover(); }}
+          >
+            Open Today
+          </button>
+        </div>
+      )}
+      </>
+      )}
+
+      {/* TEAM tab content */}
+      {popoverTab === 'team' && (
+      <>
+      {/* Recent pings — shown above the presence bar so users catching up see
+          what they missed first. Auto-clears server-side after 6h. */}
+      {recentPings.length > 0 && (
+        <div style={{ padding: '6px 16px 0' }}>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600, marginBottom: 6 }}>
+            Recent pings
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 140, overflowY: 'auto' }}>
+            {recentPings.slice(0, 5).map((p) => (
+              <div key={p.id} style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                padding: '7px 10px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--zen-tertiary-bg)',
+                border: '1px solid var(--zen-divider)',
+              }}>
+                <Megaphone size={11} style={{ color: 'var(--zen-primary)', flexShrink: 0, marginTop: 2 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-text)', lineHeight: 1.35 }}>{p.message}</div>
+                  <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 2, display: 'flex', gap: 6 }}>
+                    <span>{p.senderName}</span>
+                    <span>·</span>
+                    <span>{formatRelative(p.timestamp)}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => dismissPing(p.id)}
+                  title="Dismiss"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--zen-tertiary-text)', display: 'flex', padding: 2, borderRadius: 4, flexShrink: 0 }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = 'var(--zen-text)'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--zen-tertiary-text)'}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Presence Bar */}
       <div className="presence-bar">
         <div className="presence-track">
@@ -767,6 +916,8 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           ))
         )}
       </div>
+      </>
+      )}
 
       {/* Footer */}
       <div className="footer">
@@ -777,6 +928,14 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           <button className="footer-icon-btn" onClick={() => setShowTimerInput(true)} title="Record Time">
             <Timer size={15} />
           </button>
+          {onOpenProjects && (
+            <button className="footer-icon-btn" onClick={onOpenProjects} title="Projects">
+              <Briefcase size={15} />
+            </button>
+          )}
+          <button className="footer-icon-btn" onClick={() => setShowPingSheet(true)} title="Send a quick heads-up to teammates">
+            <Megaphone size={15} />
+          </button>
         </div>
         <button className="footer-action-btn" onClick={() => window.zenstate.openDashboard()}>
           <LayoutDashboard size={13} />
@@ -786,6 +945,14 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           Quit
         </button>
       </div>
+
+      {/* Send Ping sheet — opens above the popover content. The peer list passed
+          here is the full discovered set (online + recently offline) so users
+          can include offline teammates in groups; only currently-connected peers
+          actually receive the ping. */}
+      {showPingSheet && (
+        <SendPingSheet peers={peers} onClose={() => setShowPingSheet(false)} />
+      )}
     </div>
   );
 }

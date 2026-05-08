@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Settings, Tag, Info, Shield, Wifi, Clock, KeyRound } from 'lucide-react';
-import { User, AppSettings, FocusTemplate, LicenseState } from '../../../shared/types';
-import { CATEGORY_PALETTE, getCategoryColor } from '../../utils/categoryColors';
+import React, { useState, useEffect, useRef } from 'react';
+import { Settings, Info, Shield, Wifi, KeyRound, Briefcase } from 'lucide-react';
+import { User, AppSettings, LicenseState, BasecampAuthState, BasecampCredentials } from '../../../shared/types';
 import { ProBadge, ProGate } from '../../components/ProGate';
 import LicenseActivationModal from '../../components/LicenseActivationModal';
+import NetworkTab from './NetworkTab';
 
 // Avatar colors — no green/orange/red (reserved for status indicators)
 const COLOR_OPTIONS = ['#007AFF', '#5856D6', '#AF52DE', '#FF2D55', '#00C7BE', '#5AC8FA', '#BF5AF2', '#A2845E'];
@@ -32,7 +32,7 @@ interface Props {
   onSignOut: () => void;
 }
 
-type SettingsSection = 'general' | 'categories' | 'templates' | 'network' | 'about' | 'admin' | 'license';
+type SettingsSection = 'general' | 'network' | 'basecamp' | 'about' | 'admin' | 'license';
 
 export default function SettingsTab({ currentUser, peers, isPro, licenseState, onLicenseStateChange, onUserUpdate, onSignOut }: Props) {
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
@@ -49,42 +49,35 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     currentUser.avatarImageData ? 'photo' : currentUser.avatarEmoji ? 'emoji' : 'initial'
   );
 
-  // Categories
-  const [categories, setCategories] = useState<string[]>([]);
-  const [newCategoryInput, setNewCategoryInput] = useState('');
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({});
-  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
-
   // Network
   const [localInfo, setLocalInfo] = useState<{ addresses: string[]; port: number }>({ addresses: [], port: 0 });
   const [connectIpInput, setConnectIpInput] = useState('');
   const [connectStatus, setConnectStatus] = useState('');
 
+  // Basecamp
+  const [bcAuthState, setBcAuthState] = useState<BasecampAuthState | null>(null);
+  const [bcCredentials, setBcCredentials] = useState<BasecampCredentials>({ clientId: '', clientSecret: '' });
+  const [bcCredentialsSaved, setBcCredentialsSaved] = useState(false);
+  const [bcShowSecret, setBcShowSecret] = useState(false);
+  const [bcConnecting, setBcConnecting] = useState(false);
+  const [bcStatus, setBcStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [bcConnectElapsed, setBcConnectElapsed] = useState(0);
+  const bcConnectTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bcConnectInFlight = useRef(false);
+
   // App settings (productivity)
   const [appSettings, setAppSettings] = useState<AppSettings>({
-    dailyFocusGoalSeconds: 0,
     breakReminderEnabled: false,
     breakReminderIntervalSeconds: 90 * 60,
     idleDetectionEnabled: false,
     idleThresholdSeconds: 5 * 60,
+    requireTimesheetConfirmation: true,
+    miniTimerEnabled: true,
+    miniTimerAutoDim: false,
   });
 
   // Admin notifications
-  const [adminMessage, setAdminMessage] = useState('');
-  const [selectedPeerIds, setSelectedPeerIds] = useState<Set<string>>(new Set());
-  const [notifSent, setNotifSent] = useState(false);
 
-  // Timer templates
-  const [templates, setTemplates] = useState<FocusTemplate[]>([]);
-  const [newTemplateName, setNewTemplateName] = useState('');
-  const [newTemplateDuration, setNewTemplateDuration] = useState(25);
-  const [newTemplateCategory, setNewTemplateCategory] = useState('');
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [editTemplateName, setEditTemplateName] = useState('');
-  const [editTemplateDuration, setEditTemplateDuration] = useState(25);
-  const [editTemplateCategory, setEditTemplateCategory] = useState('');
 
   const [showLicenseModal, setShowLicenseModal] = useState(false);
   const isAdmin = currentUser.isAdmin === true;
@@ -96,13 +89,6 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     (window as any).zenstate.getAppVersion?.().then((v: string) => {
       setAppVersion(v);
     }).catch(() => {});
-    // Load categories and colors
-    (window as any).zenstate.getCategories?.().then((cats: string[]) => {
-      setCategories(cats || []);
-    }).catch(() => {});
-    (window as any).zenstate.getCategoryColors?.().then((colors: Record<string, string>) => {
-      setCategoryColors(colors || {});
-    }).catch(() => {});
     // Load network info
     (window as any).zenstate.getLocalInfo?.().then((info: { addresses: string[]; port: number }) => {
       setLocalInfo(info);
@@ -111,18 +97,34 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
       if (s) setAppSettings(s);
     }).catch(() => {});
-    // Load templates
-    (window as any).zenstate.getTemplates?.().then((t: FocusTemplate[]) => {
-      setTemplates(t || []);
-    }).catch(() => {});
-
     // Listen for auto-update download completion
     (window as any).zenstate.on('update:downloaded', () => {
       setUpdateStatus('downloaded');
     });
 
+    // Basecamp: seed state and listen for auth changes from main process
+    (window as any).zenstate.bcGetAuthState?.().then((state: BasecampAuthState) => {
+      setBcAuthState(state);
+    }).catch(() => {});
+    (window as any).zenstate.bcGetCredentials?.().then((creds: BasecampCredentials | null) => {
+      if (creds) {
+        setBcCredentials(creds);
+        setBcCredentialsSaved(true);
+      }
+    }).catch(() => {});
+    const bcAuthHandler = (...args: unknown[]) => {
+      const state = args[0] as BasecampAuthState;
+      setBcAuthState(state);
+      setBcConnecting(false);
+      if (bcConnectTimer.current) { clearInterval(bcConnectTimer.current); bcConnectTimer.current = null; }
+      setBcConnectElapsed(0);
+    };
+    (window as any).zenstate.on('basecamp:auth-changed', bcAuthHandler);
+
     return () => {
       (window as any).zenstate.removeAllListeners?.('update:downloaded');
+      (window as any).zenstate.removeAllListeners?.('basecamp:auth-changed');
+      if (bcConnectTimer.current) clearInterval(bcConnectTimer.current);
     };
   }, []);
 
@@ -165,21 +167,82 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     (window as any).zenstate.saveSettings?.(updated);
   }
 
-  function handleSendAdminNotification(broadcast: boolean) {
-    if (!adminMessage.trim()) return;
-    const recipientIds = broadcast ? 'all' as const : Array.from(selectedPeerIds);
-    if (!broadcast && recipientIds.length === 0) return;
-    (window as any).zenstate.sendAdminNotification?.(recipientIds, adminMessage.trim());
-    setAdminMessage('');
-    setSelectedPeerIds(new Set());
-    setNotifSent(true);
-    setTimeout(() => setNotifSent(false), 3000);
-  }
-
   async function handleResetApp() {
     await (window as any).zenstate.resetAllData();
     setShowResetConfirm(false);
     onSignOut();
+  }
+
+  async function handleBcSaveCredentials() {
+    setBcStatus(null);
+    const ok = await (window as any).zenstate.bcSaveCredentials?.(bcCredentials).catch(() => false);
+    if (ok) {
+      setBcCredentialsSaved(true);
+      setBcStatus({ type: 'success', message: 'Credentials saved.' });
+    } else {
+      setBcStatus({ type: 'error', message: 'Failed to save credentials.' });
+    }
+  }
+
+  async function handleBcConnect() {
+    if (bcConnectInFlight.current) return;
+    bcConnectInFlight.current = true;
+    setBcStatus(null);
+    setBcConnecting(true);
+    setBcConnectElapsed(0);
+    bcConnectTimer.current = setInterval(() => {
+      setBcConnectElapsed((prev) => prev + 1);
+    }, 1000);
+    try {
+      const result = await (window as any).zenstate.bcConnect?.().catch((): { ok: boolean; error?: string; state?: BasecampAuthState } => ({ ok: false, error: 'Connection failed.' }));
+      if (result?.ok && result.state) {
+        setBcAuthState(result.state);
+        setBcStatus({ type: 'success', message: 'Connected to Basecamp.' });
+      } else {
+        setBcStatus({ type: 'error', message: result?.error || 'Connection failed.' });
+      }
+    } finally {
+      if (bcConnectTimer.current) { clearInterval(bcConnectTimer.current); bcConnectTimer.current = null; }
+      setBcConnecting(false);
+      setBcConnectElapsed(0);
+      bcConnectInFlight.current = false;
+    }
+  }
+
+  async function handleBcDisconnect() {
+    if (!confirm('Disconnect from Basecamp? You can reconnect any time.')) return;
+    const state = await (window as any).zenstate.bcDisconnect?.().catch(() => null);
+    if (state) setBcAuthState(state);
+    setBcCredentialsSaved(false);
+    setBcStatus(null);
+  }
+
+  const [bcSyncing, setBcSyncing] = useState(false);
+  async function handleBcBackfill() {
+    setBcSyncing(true);
+    setBcStatus(null);
+    const res = await (window as any).zenstate.bcBackfillTimesheet?.().catch((e: Error) => ({ ok: false, error: e.message }));
+    setBcSyncing(false);
+    if (!res?.ok) {
+      setBcStatus({ type: 'error', message: res?.error || 'Sync failed.' });
+      return;
+    }
+    const { migrated, failed, totalUnsynced, groups } = res.data || {};
+    if ((totalUnsynced ?? 0) === 0) {
+      setBcStatus({ type: 'success', message: 'Nothing to sync — all past sessions are already on Basecamp.' });
+      return;
+    }
+    if (failed && failed > 0) {
+      setBcStatus({
+        type: 'error',
+        message: `Synced ${migrated} of ${totalUnsynced} sessions (${groups} entries). ${failed} failed — see logs.`,
+      });
+    } else {
+      setBcStatus({
+        type: 'success',
+        message: `Synced ${migrated} sessions to Basecamp as ${groups} timesheet ${groups === 1 ? 'entry' : 'entries'}.`,
+      });
+    }
   }
 
   async function handlePickPhoto() {
@@ -198,30 +261,6 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
   function handleEmojiSelect(emoji: string) {
     onUserUpdate({ avatarEmoji: emoji, avatarImageData: undefined });
     setAvatarMode('emoji');
-  }
-
-  function handleAddCategory() {
-    const cat = newCategoryInput.trim();
-    if (!cat || categories.includes(cat)) return;
-    const updated = [...categories, cat];
-    setCategories(updated);
-    (window as any).zenstate.saveCategories(updated);
-    setNewCategoryInput('');
-  }
-
-  function handleDeleteCategory(cat: string) {
-    const updated = categories.filter((c) => c !== cat);
-    setCategories(updated);
-    (window as any).zenstate.saveCategories(updated);
-  }
-
-  function handleMoveCategory(index: number, direction: -1 | 1) {
-    const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= categories.length) return;
-    const updated = [...categories];
-    [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
-    setCategories(updated);
-    (window as any).zenstate.saveCategories(updated);
   }
 
   async function handleConnectIP() {
@@ -274,9 +313,8 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
 
   const sections: { id: SettingsSection; label: string; icon: React.ReactNode; adminOnly?: boolean; proOnly?: boolean }[] = [
     { id: 'general', label: 'General', icon: <Settings size={16} /> },
-    { id: 'categories', label: 'Categories', icon: <Tag size={16} /> },
-    { id: 'templates', label: 'Templates', icon: <Clock size={16} />, proOnly: true },
     { id: 'network', label: 'Network', icon: <Wifi size={16} /> },
+    { id: 'basecamp', label: 'Basecamp', icon: <Briefcase size={16} /> },
     { id: 'license', label: 'License', icon: <KeyRound size={16} /> },
     { id: 'about', label: 'About', icon: <Info size={16} /> },
     { id: 'admin', label: 'Admin', icon: <Shield size={16} />, adminOnly: true, proOnly: true },
@@ -620,6 +658,84 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
 
           <div className="divider" />
 
+          {/* Floating mini-timer overlay */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, marginTop: 8 }}>
+            <span style={{ fontSize: 13, flex: 1 }}>⏱ Floating timer pill</span>
+            <button
+              onClick={() => updateAppSettings({ miniTimerEnabled: !appSettings.miniTimerEnabled })}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none',
+                background: appSettings.miniTimerEnabled ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                cursor: 'pointer', position: 'relative', transition: 'background 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: 'white',
+                position: 'absolute', top: 2,
+                left: appSettings.miniTimerEnabled ? 22 : 2,
+                transition: 'left 0.2s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginBottom: 12 }}>
+            A small timer pill floats on top of all apps — including full-screen ones — while a timer is running. Click it to switch tasks. Drag to any corner.
+          </div>
+
+          {/* Auto-dim pill */}
+          {appSettings.miniTimerEnabled && (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 13, flex: 1 }}>👁 Auto-dim pill when idle</span>
+                <button
+                  onClick={() => updateAppSettings({ miniTimerAutoDim: !appSettings.miniTimerAutoDim })}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12, border: 'none',
+                    background: appSettings.miniTimerAutoDim ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                    cursor: 'pointer', position: 'relative', transition: 'background 0.2s ease',
+                  }}
+                >
+                  <div style={{
+                    width: 20, height: 20, borderRadius: '50%', background: 'white',
+                    position: 'absolute', top: 2,
+                    left: appSettings.miniTimerAutoDim ? 22 : 2,
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                  }} />
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginBottom: 12 }}>
+                Pill fades to half-opacity after a few seconds of no hover, so it stays out of your way without disappearing. Hover to bring it back.
+              </div>
+            </>
+          )}
+
+          {/* Pre-flight Basecamp confirmation */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 13, flex: 1 }}>📋 Review before posting to Basecamp</span>
+            <button
+              onClick={() => updateAppSettings({ requireTimesheetConfirmation: !appSettings.requireTimesheetConfirmation })}
+              style={{
+                width: 44, height: 24, borderRadius: 12, border: 'none',
+                background: appSettings.requireTimesheetConfirmation ? 'var(--zen-primary)' : 'var(--zen-secondary-bg)',
+                cursor: 'pointer', position: 'relative', transition: 'background 0.2s ease',
+              }}
+            >
+              <div style={{
+                width: 20, height: 20, borderRadius: '50%', background: 'white',
+                position: 'absolute', top: 2,
+                left: appSettings.requireTimesheetConfirmation ? 22 : 2,
+                transition: 'left 0.2s ease',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }} />
+            </button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginBottom: 12 }}>
+            When on, a small dialog appears when a Basecamp-linked timer stops so you can edit the duration and choose Post or Discard. Nothing reaches Basecamp until you confirm.
+          </div>
+
+          <div className="divider" />
+
           {/* Sign Out */}
           {showSignOutConfirm ? (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
@@ -639,431 +755,14 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
         </div>
       )}
 
-      {/* Categories Section */}
-      {activeSection === 'categories' && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Focus Categories</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 12 }}>
-            {categories.map((cat, index) => {
-              const catColor = getCategoryColor(cat, categoryColors, categories);
-              return (
-                <div key={cat}>
-                  <div
-                    draggable
-                    onDragStart={() => setDragIndex(index)}
-                    onDragOver={(e) => { e.preventDefault(); setDragOverIndex(index); }}
-                    onDragLeave={() => { if (dragOverIndex === index) setDragOverIndex(null); }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (dragIndex !== null && dragIndex !== index) {
-                        const updated = [...categories];
-                        const [moved] = updated.splice(dragIndex, 1);
-                        updated.splice(index, 0, moved);
-                        setCategories(updated);
-                        (window as any).zenstate.saveCategories(updated);
-                      }
-                      setDragIndex(null);
-                      setDragOverIndex(null);
-                    }}
-                    onDragEnd={() => { setDragIndex(null); setDragOverIndex(null); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '4px 8px',
-                      height: 32,
-                      borderRadius: 6,
-                      background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
-                      fontSize: 12,
-                      opacity: dragIndex === index ? 0.4 : 1,
-                      borderTop: dragOverIndex === index && dragIndex !== null && dragIndex > index ? '2px solid var(--zen-primary)' : '2px solid transparent',
-                      borderBottom: dragOverIndex === index && dragIndex !== null && dragIndex < index ? '2px solid var(--zen-primary)' : '2px solid transparent',
-                      transition: 'opacity 0.15s ease',
-                      cursor: 'grab',
-                    }}
-                  >
-                    <span style={{ fontSize: 14, color: 'var(--zen-tertiary-text)', cursor: 'grab', flexShrink: 0, userSelect: 'none' }}>
-                      ⠿
-                    </span>
-                    <div
-                      onClick={() => setColorPickerFor(colorPickerFor === cat ? null : cat)}
-                      style={{
-                        width: 12, height: 12, borderRadius: '50%',
-                        background: catColor, cursor: 'pointer', flexShrink: 0,
-                        border: '1px solid rgba(255,255,255,0.15)',
-                      }}
-                      title="Change color"
-                    />
-                    <span style={{ flex: 1, color: catColor, fontWeight: 500 }}>{cat}</span>
-                    <button
-                      onClick={() => handleDeleteCategory(cat)}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--zen-tertiary-text)', fontSize: 14,
-                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
-                      }}
-                      title="Remove category"
-                    >
-                      ×
-                    </button>
-                  </div>
-                  {/* Inline color picker */}
-                  {colorPickerFor === cat && (
-                    <div style={{ display: 'flex', gap: 4, padding: '6px 8px 6px 36px', flexWrap: 'wrap' }}>
-                      {CATEGORY_PALETTE.map((color) => (
-                        <div
-                          key={color}
-                          onClick={() => {
-                            const updated = { ...categoryColors, [cat]: color };
-                            setCategoryColors(updated);
-                            (window as any).zenstate.saveCategoryColors(updated);
-                            setColorPickerFor(null);
-                          }}
-                          style={{
-                            width: 18, height: 18, borderRadius: '50%', background: color, cursor: 'pointer',
-                            border: catColor === color ? '2px solid white' : '1px solid rgba(255,255,255,0.1)',
-                            transition: 'transform 0.1s ease',
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.2)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
 
-          {/* Add category */}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              className="text-input"
-              placeholder="New category..."
-              value={newCategoryInput}
-              onChange={(e) => setNewCategoryInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
-              style={{ flex: 1, fontSize: 12 }}
-            />
-            <button
-              className="btn btn-primary"
-              style={{ fontSize: 11 }}
-              onClick={handleAddCategory}
-              disabled={!newCategoryInput.trim()}
-            >
-              + Add
-            </button>
-          </div>
 
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--zen-tertiary-text)' }}>
-            Drag ⠿ to reorder. Categories organize your focus sessions and time tracking.
-          </div>
-        </div>
-      )}
-
-      {/* Timer Templates Section */}
-      {activeSection === 'templates' && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Timer Templates</div>
-          <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 16 }}>
-            Quick-start templates appear on the Timer tab and menu popup. Click to instantly start a timer.
-          </div>
-
-          {/* Existing templates */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 16 }}>
-            {templates.map((t, index) => (
-              <div key={t.id}>
-                {editingTemplateId === t.id ? (
-                  <div style={{
-                    padding: '8px',
-                    borderRadius: 6,
-                    background: 'var(--zen-tertiary-bg)',
-                    marginBottom: 4,
-                  }}>
-                    <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                      <input
-                        className="text-input"
-                        placeholder="Template name"
-                        value={editTemplateName}
-                        onChange={(e) => setEditTemplateName(e.target.value)}
-                        autoFocus
-                        style={{ flex: 1, fontSize: 12 }}
-                      />
-                      <input
-                        className="text-input"
-                        type="number"
-                        min="1"
-                        value={editTemplateDuration}
-                        onChange={(e) => setEditTemplateDuration(parseInt(e.target.value) || 25)}
-                        style={{ width: 60, fontSize: 12, textAlign: 'center' }}
-                      />
-                      <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
-                    </div>
-                    {categories.length > 0 && (
-                      <div style={{ marginBottom: 8 }}>
-                        <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category *</div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                          {categories.map((cat) => (
-                            <button
-                              key={cat}
-                              className={`category-chip ${editTemplateCategory === cat ? 'selected' : ''}`}
-                              onClick={() => setEditTemplateCategory(cat)}
-                              style={{ fontSize: 10 }}
-                            >
-                              {cat}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button
-                        className="btn btn-secondary"
-                        style={{ fontSize: 10 }}
-                        onClick={() => setEditingTemplateId(null)}
-                      >
-                        Cancel
-                      </button>
-                      <div className="spacer" />
-                      <button
-                        className="btn btn-primary"
-                        style={{ fontSize: 10 }}
-                        disabled={!editTemplateName.trim() || !editTemplateCategory}
-                        onClick={() => {
-                          const updated = templates.map((x) =>
-                            x.id === t.id
-                              ? { ...x, name: editTemplateName.trim(), defaultDuration: editTemplateDuration * 60, category: editTemplateCategory }
-                              : x
-                          );
-                          setTemplates(updated);
-                          (window as any).zenstate.saveTemplates(updated);
-                          setEditingTemplateId(null);
-                        }}
-                      >
-                        Save
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '6px 8px',
-                      height: 36,
-                      borderRadius: 6,
-                      background: index % 2 === 0 ? 'var(--zen-tertiary-bg)' : 'transparent',
-                      fontSize: 12,
-                    }}
-                  >
-                    <span style={{ fontWeight: 500, flex: 1 }}>{t.name}</span>
-                    <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', fontFamily: 'var(--font-mono)' }}>
-                      {Math.round(t.defaultDuration / 60)}m
-                    </span>
-                    {t.category && (
-                      <span style={{
-                        fontSize: 10,
-                        padding: '1px 6px',
-                        borderRadius: 8,
-                        background: 'var(--zen-secondary-bg)',
-                        color: 'var(--zen-secondary-text)',
-                        border: '1px solid var(--zen-divider)',
-                      }}>
-                        {t.category}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => {
-                        setEditingTemplateId(t.id);
-                        setEditTemplateName(t.name);
-                        setEditTemplateDuration(Math.round(t.defaultDuration / 60));
-                        setEditTemplateCategory(t.category || '');
-                      }}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--zen-tertiary-text)', fontSize: 12,
-                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
-                      }}
-                      title="Edit template"
-                    >
-                      ✎
-                    </button>
-                    <button
-                      onClick={() => {
-                        const updated = templates.filter((x) => x.id !== t.id);
-                        setTemplates(updated);
-                        (window as any).zenstate.saveTemplates(updated);
-                      }}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--zen-tertiary-text)', fontSize: 14,
-                        padding: '0 4px', lineHeight: 1, fontFamily: 'inherit',
-                      }}
-                      title="Remove template"
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
-            {templates.length === 0 && (
-              <div style={{ textAlign: 'center', padding: 16, color: 'var(--zen-tertiary-text)', fontSize: 12 }}>
-                No templates yet. Add one below.
-              </div>
-            )}
-          </div>
-
-          <div className="divider" />
-
-          {/* Add new template */}
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, marginTop: 8 }}>Add Template</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
-              className="text-input"
-              placeholder="Template name"
-              value={newTemplateName}
-              onChange={(e) => setNewTemplateName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && newTemplateName.trim() && newTemplateCategory) {
-                  const newTemplate: FocusTemplate = {
-                    id: crypto.randomUUID(),
-                    name: newTemplateName.trim(),
-                    icon: 'zap',
-                    defaultDuration: newTemplateDuration * 60,
-                    color: '#007AFF',
-                    category: newTemplateCategory,
-                  };
-                  const updated = [...templates, newTemplate];
-                  setTemplates(updated);
-                  (window as any).zenstate.saveTemplates(updated);
-                  setNewTemplateName('');
-                  setNewTemplateDuration(25);
-                  setNewTemplateCategory('');
-                }
-              }}
-              style={{ flex: 1, fontSize: 12 }}
-            />
-            <input
-              className="text-input"
-              type="number"
-              min="1"
-              placeholder="Min"
-              value={newTemplateDuration}
-              onChange={(e) => setNewTemplateDuration(parseInt(e.target.value) || 25)}
-              style={{ width: 60, fontSize: 12, textAlign: 'center' }}
-            />
-            <span style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', alignSelf: 'center' }}>min</span>
-          </div>
-          {categories.length > 0 && (
-            <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>Category *</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {categories.map((cat) => (
-                  <button
-                    key={cat}
-                    className={`category-chip ${newTemplateCategory === cat ? 'selected' : ''}`}
-                    onClick={() => setNewTemplateCategory(newTemplateCategory === cat ? '' : cat)}
-                    style={{ fontSize: 10 }}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <button
-            className="btn btn-primary"
-            style={{ width: '100%', fontSize: 12 }}
-            disabled={!newTemplateName.trim() || !newTemplateCategory}
-            onClick={() => {
-              const newTemplate: FocusTemplate = {
-                id: crypto.randomUUID(),
-                name: newTemplateName.trim(),
-                icon: 'zap',
-                defaultDuration: newTemplateDuration * 60,
-                color: '#007AFF',
-                category: newTemplateCategory,
-              };
-              const updated = [...templates, newTemplate];
-              setTemplates(updated);
-              (window as any).zenstate.saveTemplates(updated);
-              setNewTemplateName('');
-              setNewTemplateDuration(25);
-              setNewTemplateCategory('');
-            }}
-          >
-            + Add Template
-          </button>
-        </div>
-      )}
-
-      {/* Network Section */}
+      {/* Network Section — fully replaces the standalone Network tab.
+          Includes peer connection diagnostics (local IP/port, manual connect)
+          + WiFi info (signal, channel, nearby APs). The WiFi part is mainly
+          a troubleshooting tool for the LAN peer-discovery feature. */}
       {activeSection === 'network' && (
-        <div className="card">
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 12 }}>Network</div>
-
-          {/* Local IP display */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Your Address</div>
-            {localInfo.addresses.length > 0 ? (
-              localInfo.addresses.map((addr) => (
-                <div key={addr} style={{
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                  background: 'var(--zen-tertiary-bg)',
-                  border: '1px solid var(--zen-divider)',
-                  fontSize: 13,
-                  fontFamily: 'var(--font-mono)',
-                  marginBottom: 4,
-                }}>
-                  {addr}:{localInfo.port}
-                </div>
-              ))
-            ) : (
-              <div style={{ fontSize: 12, color: 'var(--zen-tertiary-text)' }}>
-                Not connected to a network
-              </div>
-            )}
-            <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 4 }}>
-              Share this address with team members who can't auto-discover you.
-            </div>
-          </div>
-
-          <div className="divider" />
-
-          {/* Manual connect */}
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Connect to Peer</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                className="text-input"
-                placeholder="IP:Port (e.g. 192.168.1.5:54321)"
-                value={connectIpInput}
-                onChange={(e) => setConnectIpInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleConnectIP(); }}
-                style={{ flex: 1, fontSize: 12 }}
-              />
-              <button
-                className="btn btn-primary"
-                style={{ fontSize: 11 }}
-                onClick={handleConnectIP}
-                disabled={!connectIpInput.trim()}
-              >
-                Connect
-              </button>
-            </div>
-            {connectStatus && (
-              <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginTop: 6 }}>
-                {connectStatus}
-              </div>
-            )}
-            <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 8 }}>
-              Use this to manually connect to a team member when auto-discovery isn't working.
-            </div>
-          </div>
-        </div>
+        <NetworkTab />
       )}
 
       {/* About Section */}
@@ -1149,6 +848,154 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Basecamp Section */}
+      {activeSection === 'basecamp' && (
+        <div className="card">
+          <div className="hstack" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 600 }}>Basecamp</div>
+            {bcAuthState?.isConnected && (
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#34C759', flexShrink: 0 }} />
+            )}
+          </div>
+
+          {bcAuthState?.isConnected ? (
+            <>
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: 'rgba(52, 199, 89, 0.08)',
+                border: '1px solid rgba(52, 199, 89, 0.2)',
+                marginBottom: 16,
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--status-available)', marginBottom: 6 }}>
+                  Connected
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 2 }}>
+                  Account: {bcAuthState.account?.name}
+                </div>
+                {bcAuthState.identity && (
+                  <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>
+                    Identity: {bcAuthState.identity.firstName} {bcAuthState.identity.lastName}
+                  </div>
+                )}
+              </div>
+
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: 10,
+                background: 'var(--zen-tertiary-bg)',
+                border: '1px solid var(--zen-divider)',
+                marginBottom: 12,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Share past sessions to Basecamp</div>
+                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', lineHeight: 1.5, marginBottom: 10 }}>
+                  Optional — pushes your local sessions to Basecamp's timesheet, grouped by to-do and date. Only sessions you haven't already shared are included. Run this when you're ready to update your team.
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  style={{ width: '100%' }}
+                  onClick={handleBcBackfill}
+                  disabled={bcSyncing}
+                >
+                  {bcSyncing ? 'Syncing…' : 'Sync history to Basecamp'}
+                </button>
+              </div>
+
+              {bcStatus && (
+                <div style={{ fontSize: 11, color: bcStatus.type === 'success' ? '#34C759' : '#FF3B30', marginBottom: 12 }}>
+                  {bcStatus.message}
+                </div>
+              )}
+
+              <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleBcDisconnect}>
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', lineHeight: 1.5, marginBottom: 16 }}>
+                Your private record of what you worked on. Sessions stay on this Mac until <em>you</em> review and post them to Basecamp's timesheet — nothing is sent automatically. Use it to remember your day, recover unbilled hours, or share with your team on your terms.
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                <input
+                  className="text-input"
+                  placeholder="Client ID"
+                  value={bcCredentials.clientId}
+                  onChange={(e) => { setBcCredentials((c) => ({ ...c, clientId: e.target.value })); setBcCredentialsSaved(false); }}
+                />
+                <div className="hstack" style={{ gap: 6 }}>
+                  <input
+                    className="text-input"
+                    placeholder="Client Secret"
+                    type={bcShowSecret ? 'text' : 'password'}
+                    value={bcCredentials.clientSecret}
+                    onChange={(e) => { setBcCredentials((c) => ({ ...c, clientSecret: e.target.value })); setBcCredentialsSaved(false); }}
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn btn-secondary" onClick={() => setBcShowSecret((v) => !v)} style={{ flexShrink: 0, fontSize: 11 }}>
+                    {bcShowSecret ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', lineHeight: 1.6, marginBottom: 12 }}>
+                Register an integration at{' '}
+                <span style={{ color: 'var(--zen-secondary-text)' }}>launchpad.37signals.com/integrations</span>
+                {' '}and use this redirect URI:
+                <br />
+                <span style={{ fontFamily: 'monospace', userSelect: 'all', color: 'var(--zen-secondary-text)' }}>
+                  http://127.0.0.1:53682/basecamp/callback
+                </span>
+              </div>
+
+              <div className="hstack" style={{ gap: 8, marginBottom: 8 }}>
+                <button
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
+                  onClick={handleBcSaveCredentials}
+                  disabled={!bcCredentials.clientId.trim() || !bcCredentials.clientSecret.trim()}
+                >
+                  Save credentials
+                </button>
+                <button
+                  className="btn btn-primary"
+                  style={{ flex: 1 }}
+                  onClick={handleBcConnect}
+                  disabled={!bcCredentialsSaved || bcConnecting}
+                >
+                  {bcConnecting
+                    ? bcConnectElapsed >= 30
+                      ? `Waiting… ${bcConnectElapsed}s`
+                      : 'Connecting…'
+                    : 'Connect'}
+                </button>
+                {bcConnecting && bcConnectElapsed >= 30 && (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ color: 'var(--status-focused)' }}
+                    onClick={() => {
+                      setBcConnecting(false);
+                      if (bcConnectTimer.current) { clearInterval(bcConnectTimer.current); bcConnectTimer.current = null; }
+                      setBcConnectElapsed(0);
+                      (window as any).zenstate.bcGetAuthState?.().then(setBcAuthState).catch(() => {});
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+
+              {bcStatus && (
+                <div style={{ fontSize: 11, color: bcStatus.type === 'success' ? '#34C759' : '#FF3B30' }}>
+                  {bcStatus.message}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -1300,79 +1147,6 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
             )}
           </div>
 
-          {/* Admin Notifications */}
-          <div className="card" style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>📢 Send Notification</div>
-            <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 12 }}>
-              Send a message to specific team members or broadcast to all
-            </div>
-
-            <textarea
-              className="text-input"
-              placeholder="Type your message..."
-              value={adminMessage}
-              onChange={(e) => setAdminMessage(e.target.value)}
-              style={{ width: '100%', minHeight: 60, resize: 'vertical', fontSize: 12, marginBottom: 12, fontFamily: 'inherit' }}
-            />
-
-            {/* Peer selection */}
-            {peers.length > 0 && (
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', marginBottom: 6 }}>Select recipients:</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {peers.map((peer) => (
-                    <label key={peer.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, cursor: 'pointer' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedPeerIds.has(peer.id)}
-                        onChange={(e) => {
-                          const next = new Set(selectedPeerIds);
-                          if (e.target.checked) next.add(peer.id);
-                          else next.delete(peer.id);
-                          setSelectedPeerIds(next);
-                        }}
-                        style={{ accentColor: 'var(--zen-primary)' }}
-                      />
-                      <div style={{
-                        width: 20, height: 20, borderRadius: '50%',
-                        background: peer.avatarColor || '#8E8E93',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 10, overflow: 'hidden',
-                      }}>
-                        {peer.avatarEmoji || peer.name.charAt(0).toUpperCase()}
-                      </div>
-                      {peer.name}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1, fontSize: 11 }}
-                disabled={!adminMessage.trim() || selectedPeerIds.size === 0}
-                onClick={() => handleSendAdminNotification(false)}
-              >
-                Send to Selected
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1, fontSize: 11, borderColor: 'var(--zen-primary)', color: 'var(--zen-primary)' }}
-                disabled={!adminMessage.trim() || peers.length === 0}
-                onClick={() => handleSendAdminNotification(true)}
-              >
-                Broadcast to All
-              </button>
-            </div>
-
-            {notifSent && (
-              <div style={{ fontSize: 11, color: 'var(--status-available)', marginTop: 8, textAlign: 'center' }}>
-                Notification sent!
-              </div>
-            )}
-          </div>
         </>
       )}
     </div>

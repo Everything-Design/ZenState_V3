@@ -1,6 +1,6 @@
 {
   "name": "zenstate",
-  "version": "4.0.14",
+  "version": "4.0.19",
   "description": "ZenState - Everything Flow",
   "main": "dist/main/index.js",
   "scripts": {
@@ -68,7 +68,11 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSLocationUsageDescription": "ZenState uses your location to identify which WiFi access point you are connected to.",
-        "NSLocationWhenInUseUsageDescription": "ZenState uses your location to identify which WiFi access point you are connected to."
+        "NSLocationWhenInUseUsageDescription": "ZenState uses your location to identify which WiFi access point you are connected to.",
+        "NSLocalNetworkUsageDescription": "ZenState discovers teammates on your local network for presence and meeting requests.",
+        "NSBonjourServices": [
+          "_zenstate._tcp"
+        ]
       }
     },
     "win": {

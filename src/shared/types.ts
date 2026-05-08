@@ -45,7 +45,24 @@ export enum MessageType {
   UserInfo = 'userInfo',
   EmergencyMeetingRequest = 'emergencyMeetingRequest',
   EmergencyAccessGrant = 'emergencyAccessGrant',
-  AdminNotification = 'adminNotification',
+  QuickPing = 'quickPing', // lightweight team-wide notification (anyone can send)
+}
+
+// A reusable list of peers a user can ping with one tap. Stored per-machine.
+export interface PeerGroup {
+  id: string;          // uuid
+  name: string;        // "Design Team", "Standup", etc.
+  memberIds: string[]; // ZenState peer userIds
+}
+
+// A ping the user has received (kept in memory + persisted briefly so users
+// who missed the toast can still see "what happened in the last hour").
+export interface ReceivedPing {
+  id: string;          // uuid generated on receive
+  senderId: string;
+  senderName: string;
+  message: string;
+  timestamp: string;   // ISO
 }
 
 export interface PeerMessage {
@@ -65,6 +82,13 @@ export interface DailySession {
   duration: number;
   category?: string;
   notes?: string;
+  basecamp?: {
+    accountId: number;
+    projectId: number;
+    todoId: number;
+    todoListId?: number;
+    synced?: boolean; // true once pushed to Basecamp's timesheet
+  };
 }
 
 export interface DailyRecord {
@@ -85,21 +109,115 @@ export interface FocusSchedule {
   taskLabel?: string;
 }
 
-export interface FocusTemplate {
-  id: string;
-  name: string;
-  icon: string;
-  defaultDuration: number;
-  color: string;
-  category?: string;
-}
-
 export interface AppSettings {
-  dailyFocusGoalSeconds: number;
   breakReminderEnabled: boolean;
   breakReminderIntervalSeconds: number;
   idleDetectionEnabled: boolean;
   idleThresholdSeconds: number;
+  // When true, a Basecamp timesheet entry isn't posted automatically when a
+  // timer stops — the user reviews the duration first in a confirmation alert.
+  requireTimesheetConfirmation: boolean;
+  // When true, a small floating pill window appears on top of all other apps
+  // (including full-screen apps) while a timer is running.
+  miniTimerEnabled: boolean;
+  miniTimerX?: number;
+  miniTimerY?: number;
+  // When true, the floating pill fades to ~50% opacity after a few seconds
+  // of no hover, so it stays out of the way without going invisible.
+  miniTimerAutoDim: boolean;
+}
+
+// ── Basecamp Types ─────────────────────────────────────────────
+
+export interface BasecampCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
+export interface BasecampAccount {
+  id: number;
+  name: string;
+  href: string; // e.g. "https://3.basecampapp.com/1234567"
+  product: string; // "bc3"
+}
+
+export interface BasecampAuthState {
+  isConnected: boolean;
+  account?: { id: number; name: string };
+  identity?: { id: number; firstName: string; lastName: string; emailAddress: string };
+  expiresAt?: string;
+  error?: string;
+}
+
+export interface BasecampProject {
+  id: number;
+  name: string;
+  description?: string;
+  todoSetId?: number; // dock entry id for "todoset"
+  timesheetEnabled?: boolean;
+}
+
+// A Basecamp todo the user has committed to focusing on today. Stored locally,
+// resets at midnight (the planner is a daily ritual, not a permanent list).
+export interface PinnedTodo {
+  todoId: number;
+  projectId: number;
+  todoListId: number;
+  accountId: number;
+  content: string;        // todo title cached at pin time
+  projectName: string;    // project name cached at pin time
+  estimateMinutes?: number; // optional Newport-style "deep schedule" estimate
+}
+
+export interface TodayPlan {
+  date: string;           // YYYY-MM-DD — used to auto-reset at the next day
+  items: PinnedTodo[];
+}
+
+// Track recently-used Basecamp todos so the popover can offer one-tap restart
+// without forcing the full Project → List → Todo drill-down every time.
+export interface RecentTodo {
+  todoId: number;
+  projectId: number;
+  todoListId: number;
+  accountId: number;
+  content: string;
+  projectName: string;
+  lastUsedAt: string;     // ISO timestamp — most-recent first
+}
+
+export interface BasecampTimesheetEntry {
+  id: number;
+  date: string;          // YYYY-MM-DD
+  hours: string;         // decimal as string, e.g. "1.5"
+  description?: string;
+  parentId: number;      // recording id (todo or message)
+  parentTitle?: string;
+  parentType?: string;
+  personId: number;
+  personName: string;
+  appUrl: string;
+}
+
+export interface BasecampTodoList {
+  id: number;
+  title: string;
+  description?: string;
+  todosUrl: string;
+  groupsUrl?: string;
+}
+
+export interface BasecampTodo {
+  id: number;
+  content: string;
+  description?: string;
+  completed: boolean;
+  assigneeIds: number[];
+  dueOn?: string;
+  parentId?: number;
+  commentsCount: number;
+  url: string;
+  appUrl: string;
 }
 
 // ── License Types ──────────────────────────────────────────────
@@ -161,13 +279,10 @@ export const IPC = {
   SAVE_USER: 'data:save-user',
   DELETE_SESSION: 'data:delete-session',
   UPDATE_SESSION: 'data:update-session',
-  EXPORT_CSV: 'data:export-csv',
 
   // Settings & Templates (renderer → main)
   GET_SETTINGS: 'data:get-settings',
   SAVE_SETTINGS: 'data:save-settings',
-  GET_TEMPLATES: 'data:get-templates',
-  SAVE_TEMPLATES: 'data:save-templates',
 
   // Break/Idle/Revert notifications (main → renderer)
   BREAK_REMINDER: 'timer:break-reminder',
@@ -178,9 +293,31 @@ export const IPC = {
   SET_STATUS_REVERT: 'status:set-revert',
   CANCEL_STATUS_REVERT: 'status:cancel-revert',
 
+  // Long-run timer guard (renderer → main)
+  TIMER_LONG_RUN_RESPONSE: 'timer:long-run-response',
+
+  // Pre-flight Basecamp timesheet confirmation (renderer → main)
+  TIMER_TIMESHEET_CONFIRM: 'timer:timesheet-confirm',
+  // Mini-timer pill state changes (renderer → main)
+  MINI_TIMER_RESIZE: 'mini-timer:resize',
+  MINI_TIMER_MOVE_BY: 'mini-timer:move-by',
+  // In-progress notes capture from the pill — flushed at stop time so users
+  // can jot what they're working on without waiting for the confirm popup.
+  MINI_TIMER_GET_NOTES: 'mini-timer:get-notes',
+  MINI_TIMER_SET_NOTES: 'mini-timer:set-notes',
+
+  // Quick ping (team-wide lightweight notification — distinct from admin notification)
+  TEAM_SEND_PING: 'team:send-ping',          // renderer → main
+  TEAM_PING_RECEIVED: 'team:ping-received',  // main → renderer
+  TEAM_GET_RECENT_PINGS: 'team:get-recent-pings',
+  TEAM_DISMISS_PING: 'team:dismiss-ping',
+
+  // Peer groups (saved sets of people for one-tap multi-select)
+  GROUPS_GET: 'groups:get',
+  GROUPS_SAVE: 'groups:save',          // create or update — full PeerGroup payload
+  GROUPS_DELETE: 'groups:delete',
+
   // Admin notifications (bidirectional)
-  SEND_ADMIN_NOTIFICATION: 'admin:send-notification',
-  ADMIN_NOTIFICATION_RECEIVED: 'admin:notification-received',
 
   // Tray updates (renderer → main)
   UPDATE_TRAY: 'tray:update',
@@ -189,4 +326,29 @@ export const IPC = {
   ACTIVATE_LICENSE: 'license:activate',
   GET_LICENSE_STATE: 'license:get-state',
   DEACTIVATE_LICENSE: 'license:deactivate',
+
+  // Basecamp (renderer → main)
+  BC_GET_CREDENTIALS: 'basecamp:get-credentials',
+  BC_SAVE_CREDENTIALS: 'basecamp:save-credentials',
+  BC_CONNECT: 'basecamp:connect',
+  BC_DISCONNECT: 'basecamp:disconnect',
+  BC_GET_AUTH_STATE: 'basecamp:get-auth-state',
+  BC_LIST_PROJECTS: 'basecamp:list-projects',
+  BC_LIST_TODO_LISTS: 'basecamp:list-todo-lists',
+  BC_LIST_TODOS: 'basecamp:list-todos',
+  BC_CREATE_TODO: 'basecamp:create-todo',
+  BC_POST_COMMENT: 'basecamp:post-comment',
+  BC_CREATE_TIME_ENTRY: 'basecamp:create-time-entry',
+  BC_GET_PROJECT_TIMESHEET: 'basecamp:get-project-timesheet',
+  BC_BACKFILL_TIMESHEET: 'basecamp:backfill-timesheet',
+  BC_AUTH_CHANGED: 'basecamp:auth-changed', // main → renderer
+
+  // Today plan + Recents (renderer → main)
+  TODAY_GET: 'today:get',
+  TODAY_PIN: 'today:pin',
+  TODAY_UNPIN: 'today:unpin',
+  TODAY_REORDER: 'today:reorder',
+  TODAY_SET_ESTIMATE: 'today:set-estimate',
+  TODAY_CHANGED: 'today:changed', // main → renderer
+  RECENTS_GET: 'recents:get',
 } as const;

@@ -17,6 +17,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'src/renderer/index.html'),
         dashboard: path.resolve(__dirname, 'src/renderer/dashboard.html'),
         alert: path.resolve(__dirname, 'src/renderer/alert.html'),
+        miniTimer: path.resolve(__dirname, 'src/renderer/mini-timer.html'),
       },
     },
   },

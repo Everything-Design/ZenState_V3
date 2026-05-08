@@ -44,7 +44,7 @@ export class TimeTracker {
     };
   }
 
-  addSession(data: { taskLabel: string; category?: string; duration: number; startTime: string; endTime: string }) {
+  addSession(data: { taskLabel: string; category?: string; duration: number; startTime: string; endTime: string; basecamp?: DailySession['basecamp'] }): { sessionId: string; dateStr: string } {
     const records = this.persistence.getRecords();
     const today = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -67,11 +67,23 @@ export class TimeTracker {
       endTime: data.endTime,
       duration: data.duration,
       category: data.category,
+      basecamp: data.basecamp,
     };
 
     record.sessions.push(session);
     record.totalFocusTime = record.sessions.reduce((sum, s) => sum + s.duration, 0);
 
+    this.persistence.saveRecords(records);
+    return { sessionId: session.id, dateStr };
+  }
+
+  markSessionSynced(sessionId: string, dateStr: string) {
+    const records = this.persistence.getRecords();
+    const record = records.find((r) => r.date.startsWith(dateStr.split('T')[0]));
+    if (!record) return;
+    const session = record.sessions.find((s) => s.id === sessionId);
+    if (!session?.basecamp) return;
+    session.basecamp = { ...session.basecamp, synced: true };
     this.persistence.saveRecords(records);
   }
 
@@ -86,7 +98,7 @@ export class TimeTracker {
     this.persistence.saveRecords(records);
   }
 
-  updateSession(sessionId: string, dateStr: string, updates: Partial<{ taskLabel: string; category: string; duration: number; notes: string }>) {
+  updateSession(sessionId: string, dateStr: string, updates: Partial<{ taskLabel: string; category: string; duration: number; notes: string; basecamp: DailySession['basecamp'] | null }>) {
     const records = this.persistence.getRecords();
     const record = records.find((r) => r.date.startsWith(dateStr.split('T')[0]));
     if (!record) return;
@@ -103,52 +115,15 @@ export class TimeTracker {
       const startMs = new Date(session.startTime).getTime();
       session.endTime = new Date(startMs + updates.duration * 1000).toISOString();
     }
+    // `null` = explicit unlink; `undefined` = no change; an object replaces the link.
+    if (updates.basecamp === null) {
+      session.basecamp = undefined;
+    } else if (updates.basecamp !== undefined) {
+      session.basecamp = updates.basecamp;
+    }
 
     record.totalFocusTime = record.sessions.reduce((sum, s) => sum + s.duration, 0);
     this.persistence.saveRecords(records);
   }
 
-  generateCSV(monthStr: string): string {
-    const records = this.getRecordsForMonth(monthStr);
-    const lines: string[] = ['Date,Day,Task,Category,Start Time,End Time,Duration (minutes),Duration (formatted),Notes'];
-
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-    for (const record of records.sort((a, b) => a.date.localeCompare(b.date))) {
-      // Use T00:00:00 to avoid UTC timezone shift when parsing YYYY-MM-DD
-      const date = new Date(record.date.split('T')[0] + 'T00:00:00');
-      const dateFormatted = date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-      const dayName = dayNames[date.getDay()];
-
-      for (const session of record.sessions.filter((s) => s.duration > 0)) {
-        const startFormatted = new Date(session.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-        const endFormatted = session.endTime ? new Date(session.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '';
-        const durationMin = Math.round(session.duration / 60);
-        const hours = Math.floor(session.duration / 3600);
-        const mins = Math.floor((session.duration % 3600) / 60);
-        const durationFormatted = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
-
-        lines.push([
-          escapeCSV(dateFormatted),
-          escapeCSV(dayName),
-          escapeCSV(session.taskLabel),
-          escapeCSV(session.category || ''),
-          escapeCSV(startFormatted),
-          escapeCSV(endFormatted),
-          String(durationMin),
-          escapeCSV(durationFormatted),
-          escapeCSV(session.notes || ''),
-        ].join(','));
-      }
-    }
-
-    return lines.join('\n');
-  }
-}
-
-function escapeCSV(value: string): string {
-  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
 }

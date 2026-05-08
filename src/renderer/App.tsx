@@ -3,12 +3,13 @@ import { User, AvailabilityStatus, IPC, LicenseState } from '../shared/types';
 import LoginView from './views/LoginView';
 import MenuBarView from './views/MenuBarView';
 import SettingsView from './views/SettingsView';
+import ProjectsView from './views/ProjectsView';
 
 // Type declaration for the preload bridge
 // Note: The canonical Window.zenstate declaration is in DashboardApp.tsx.
 // This file re-declares the same interface — they MUST stay in sync.
 
-type View = 'main' | 'settings';
+type View = 'main' | 'settings' | 'projects';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -172,6 +173,19 @@ export default function App() {
     );
   }
 
+  if (view === 'projects') {
+    return (
+      <ProjectsView
+        onBack={() => setView('main')}
+        onOpenSettings={() => {
+          window.zenstate.openDashboard('settings');
+          window.zenstate.closePopover();
+        }}
+        timerState={timerState}
+      />
+    );
+  }
+
   return (
     <>
       {/* Update notification banner */}
@@ -214,6 +228,7 @@ export default function App() {
         onStatusChange={handleStatusChange}
         onUserUpdate={handleUserUpdate}
         onOpenSettings={() => setView('settings')}
+        onOpenProjects={() => setView('projects')}
       />
     </>
   );

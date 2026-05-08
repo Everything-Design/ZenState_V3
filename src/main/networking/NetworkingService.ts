@@ -7,10 +7,13 @@ import { User, PeerMessage, MessageType } from '../../shared/types';
 
 const SERVICE_TYPE = 'zenstate';
 const BEACON_PORT = 5354;
+// Fixed TCP port keeps the Bonjour-advertised port stable across sleep/wake,
+// which prevents macOS Sequoia from re-prompting for Local Network access.
+// If the port is in use we fall back to a random one (worse for the prompt
+// but the app still works).
+const PREFERRED_TCP_PORT = 47382;
 const HEARTBEAT_INTERVAL = 5000;
 const BEACON_INTERVAL = 10000;
-const SIGNAL_POLL_INTERVAL = 15000;
-const SIGNAL_SERVER_URL = 'https://zenstate-two.vercel.app';
 const NETWORK_CHECK_INTERVAL = 10000; // Check for IP changes every 10s
 const PEER_STALE_THRESHOLD = 60000; // Remove peers with no activity for 60s
 
@@ -41,7 +44,6 @@ export class NetworkingService extends EventEmitter {
 
   private pendingRetries = new Map<string, number>(); // endpoint → retry count
   private pendingConnections = new Set<string>(); // endpoints currently connecting
-  private signalTimer: NodeJS.Timeout | null = null;
   private networkCheckTimer: NodeJS.Timeout | null = null;
   private lastKnownAddresses: string[] = []; // Track IP changes
   private peerLastActivity = new Map<string, number>(); // userId → timestamp of last received message
@@ -85,7 +87,6 @@ export class NetworkingService extends EventEmitter {
   stop() {
     this.heartbeatTimer && clearInterval(this.heartbeatTimer);
     this.beaconTimer && clearInterval(this.beaconTimer);
-    this.signalTimer && clearInterval(this.signalTimer);
     this.networkCheckTimer && clearInterval(this.networkCheckTimer);
 
     this.bonjourBrowser?.stop();
@@ -118,7 +119,6 @@ export class NetworkingService extends EventEmitter {
     // Stop timers and discovery
     this.heartbeatTimer && clearInterval(this.heartbeatTimer);
     this.beaconTimer && clearInterval(this.beaconTimer);
-    this.signalTimer && clearInterval(this.signalTimer);
     // Keep networkCheckTimer running — it's what triggers restart
 
     // Teardown Bonjour
@@ -171,6 +171,31 @@ export class NetworkingService extends EventEmitter {
   }
 
   /**
+   * Called on system suspend to gracefully unpublish Bonjour and close UDP sockets.
+   * Doing this explicitly (rather than letting the OS rip the sockets apart) keeps
+   * macOS Sequoia from treating the post-resume re-publish as a fresh local-network
+   * access request.
+   */
+  prepareForSuspend() {
+    console.log('NetworkingService: preparing for system suspend...');
+    try {
+      this.bonjourBrowser?.stop();
+      this.bonjourService && this.bonjour?.unpublishAll();
+      this.bonjour?.destroy();
+    } catch (err) {
+      console.warn('Bonjour suspend teardown error:', err);
+    }
+    this.bonjour = null;
+    this.bonjourBrowser = null;
+    this.bonjourService = null;
+
+    try { this.beaconSocket?.close(); } catch (_) { /* ignore */ }
+    try { this.beaconListener?.close(); } catch (_) { /* ignore */ }
+    this.beaconSocket = null;
+    this.beaconListener = null;
+  }
+
+  /**
    * Called on system resume from sleep to handle potential network changes.
    */
   handleSystemResume() {
@@ -220,6 +245,30 @@ export class NetworkingService extends EventEmitter {
     return addresses;
   }
 
+  /**
+   * Returns subnet-directed broadcast addresses (e.g. "192.168.1.255")
+   * for every active IPv4 interface. Many routers drop the limited broadcast
+   * `255.255.255.255`, so we send the beacon to each subnet broadcast instead.
+   * Always includes `255.255.255.255` as a final fallback in case netmask is
+   * missing on some virtual interface.
+   */
+  getBroadcastAddresses(): string[] {
+    const interfaces = os.networkInterfaces();
+    const broadcasts = new Set<string>();
+    for (const name of Object.keys(interfaces)) {
+      for (const iface of interfaces[name] || []) {
+        if (iface.family !== 'IPv4' || iface.internal || !iface.netmask) continue;
+        const ipParts = iface.address.split('.').map(Number);
+        const maskParts = iface.netmask.split('.').map(Number);
+        if (ipParts.length !== 4 || maskParts.length !== 4) continue;
+        const bcastParts = ipParts.map((b, i) => (b & maskParts[i]) | (~maskParts[i] & 0xff));
+        broadcasts.add(bcastParts.join('.'));
+      }
+    }
+    broadcasts.add('255.255.255.255'); // last-resort limited broadcast
+    return Array.from(broadcasts);
+  }
+
   sendMeetingRequest(userId: string, message?: string) {
     this.sendPeerMessage(userId, {
       type: MessageType.MeetingRequest,
@@ -259,24 +308,27 @@ export class NetworkingService extends EventEmitter {
     });
   }
 
-  sendAdminNotification(recipientIds: string[] | 'all', message: string) {
+  // Quick ping — lightweight team-wide notification anyone can send.
+  // Pings are one-way; recipients see a native notification + an in-app
+  // banner. Returns the count of peers actually reached so the sender can
+  // show a "Sent to 3 people" toast.
+  sendQuickPing(recipientIds: string[], message: string): number {
     const msg: PeerMessage = {
-      type: MessageType.AdminNotification,
+      type: MessageType.QuickPing,
       senderId: this.currentUser.id,
       senderName: this.currentUser.name,
       timestamp: new Date().toISOString(),
       requestMessage: message,
     };
-
-    if (recipientIds === 'all') {
-      for (const socket of this.connections.values()) {
+    let delivered = 0;
+    for (const userId of recipientIds) {
+      const socket = this.connections.get(userId);
+      if (socket && !socket.destroyed) {
         this.sendWireMessage(socket, msg);
-      }
-    } else {
-      for (const userId of recipientIds) {
-        this.sendPeerMessage(userId, msg);
+        delivered++;
       }
     }
+    return delivered;
   }
 
   grantEmergencyAccess(userId: string, granted: boolean) {
@@ -304,27 +356,35 @@ export class NetworkingService extends EventEmitter {
       this.handleIncomingConnection(socket);
     });
 
-    this.tcpServer.on('error', (err) => {
-      console.error('TCP server error:', err);
-    });
-
-    // Listen on random port (like NWListener dynamic port)
-    this.tcpServer.listen(0, () => {
+    const onListening = () => {
       const addr = this.tcpServer!.address() as net.AddressInfo;
       this.tcpPort = addr.port;
       console.log(`TCP server listening on port ${this.tcpPort}`);
 
-      // Capture initial IPs for change detection
       this.lastKnownAddresses = this.getLocalAddresses();
 
-      // Now start Bonjour advertising + browsing + beacons + signaling
       this.startBonjour();
       this.startHeartbeat();
       this.startBeaconListener();
       this.startBeaconBroadcast();
-      this.startSignaling();
       this.startNetworkChangeDetection();
+    };
+
+    let usingFallback = false;
+    this.tcpServer.on('error', (err: NodeJS.ErrnoException) => {
+      if (!usingFallback && err.code === 'EADDRINUSE') {
+        usingFallback = true;
+        console.warn(`Preferred port ${PREFERRED_TCP_PORT} in use, falling back to a random port`);
+        this.tcpServer!.removeAllListeners('listening');
+        this.tcpServer!.once('listening', onListening);
+        this.tcpServer!.listen(0);
+        return;
+      }
+      console.error('TCP server error:', err);
     });
+
+    this.tcpServer.once('listening', onListening);
+    this.tcpServer.listen(PREFERRED_TCP_PORT);
   }
 
   private handleIncomingConnection(socket: net.Socket) {
@@ -629,11 +689,12 @@ export class NetworkingService extends EventEmitter {
         break;
       }
 
-      case MessageType.AdminNotification:
-        this.emit('adminNotification', {
-          from: message.senderName,
+      case MessageType.QuickPing:
+        this.emit('quickPing', {
+          senderName: message.senderName,
           senderId: message.senderId,
-          message: message.requestMessage,
+          message: message.requestMessage ?? '',
+          timestamp: message.timestamp,
         });
         break;
     }
@@ -743,66 +804,15 @@ export class NetworkingService extends EventEmitter {
 
     const beacon = `ZENSTATE|${this.currentUser.id}|${this.tcpPort}`;
     const data = Buffer.from(beacon, 'utf-8');
+    const targets = this.getBroadcastAddresses();
 
-    this.beaconSocket.send(data, BEACON_PORT, '255.255.255.255', (err) => {
-      if (err) console.error('Beacon send error:', err);
-    });
-  }
-
-  // ── Signaling Server (cloud-assisted discovery) ────────────
-
-  private startSignaling() {
-    // Send initial heartbeat immediately, then poll on interval
-    this.signalHeartbeat();
-    this.signalTimer = setInterval(() => this.signalHeartbeat(), SIGNAL_POLL_INTERVAL);
-  }
-
-  private async signalHeartbeat() {
-    if (!this.tcpPort) return;
-
-    const addresses = this.getLocalAddresses();
-    const ip = addresses[0]; // primary LAN IP
-    if (!ip) return;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    try {
-      // Register presence
-      await fetch(`${SIGNAL_SERVER_URL}/api/heartbeat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: this.currentUser.id,
-          name: this.currentUser.name,
-          username: this.currentUser.username,
-          ip,
-          port: this.tcpPort,
-        }),
-        signal: controller.signal,
+    for (const target of targets) {
+      this.beaconSocket.send(data, BEACON_PORT, target, (err) => {
+        if (err && err.message !== 'EADDRNOTAVAIL') {
+          // Subnet broadcast on an interface that's down can fail benignly.
+          console.warn(`Beacon send to ${target} failed:`, err.message);
+        }
       });
-
-      // Fetch peers
-      const res = await fetch(
-        `${SIGNAL_SERVER_URL}/api/peers?exclude=${encodeURIComponent(this.currentUser.id)}`,
-        { signal: controller.signal }
-      );
-      if (!res.ok) return;
-
-      const data = await res.json() as { peers: Array<{ userId: string; ip: string; port: number }> };
-
-      for (const peer of data.peers) {
-        // Skip if already connected
-        const existing = this.connections.get(peer.userId);
-        if (existing && !existing.destroyed) continue;
-
-        console.log(`Signal: discovered peer ${peer.userId} at ${peer.ip}:${peer.port}`);
-        this.connectToEndpoint(peer.ip, peer.port);
-      }
-    } catch (err) {
-      // Silently ignore — signaling is a supplementary discovery method
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
