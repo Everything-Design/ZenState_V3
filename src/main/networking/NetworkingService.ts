@@ -571,12 +571,23 @@ export class NetworkingService extends EventEmitter {
       this.cleanupSocket(socket, 'timeout');
     });
 
+    // Hard cap on a single message — UserInfo with a base64 avatar tops out
+    // around 200 KB; leave generous headroom but reject anything beyond ~1 MB
+    // so a hostile LAN peer can't drip-feed a 4 GiB length prefix and OOM us.
+    const MAX_FRAME_BYTES = 1_000_000;
+
     socket.on('data', (data) => {
       buffer = Buffer.concat([buffer, data]);
 
       // Process all complete messages in buffer
       while (buffer.length >= 4) {
         const messageLength = buffer.readUInt32BE(0);
+
+        if (messageLength > MAX_FRAME_BYTES) {
+          console.warn(`Oversized frame (${messageLength} bytes) from ${socket.remoteAddress} — closing socket.`);
+          this.cleanupSocket(socket, 'oversized-frame');
+          return;
+        }
 
         if (buffer.length < 4 + messageLength) break; // Incomplete message
 
@@ -881,6 +892,13 @@ export class NetworkingService extends EventEmitter {
     if (typeof u.avatarImageData === 'string' && u.avatarImageData.length > 500000) {
       u.avatarImageData = undefined;
     }
+    // Never trust privilege flags from the wire — `isAdmin` and
+    // `canSendEmergency` are local entitlements derived from the local
+    // license + admin grant table, not something a peer broadcasts about
+    // themselves. A spoofed peer claiming admin would otherwise be displayed
+    // as admin in everyone's UI.
+    u.isAdmin = false;
+    u.canSendEmergency = false;
     return data as User;
   }
 }

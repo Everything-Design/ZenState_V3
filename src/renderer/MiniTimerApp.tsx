@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Pause, Play, Square, ChevronDown, Briefcase, StickyNote } from 'lucide-react';
-import { IPC, TodayPlan, RecentTodo, PinnedTodo, AppSettings } from '../shared/types';
+import { IPC, TodayPlan, PinnedTodo, AppSettings } from '../shared/types';
 
 interface TimerState {
   elapsed: number;
@@ -29,7 +29,6 @@ export default function MiniTimerApp() {
   const [timer, setTimer] = useState<TimerState>({ elapsed: 0, isRunning: false, isPaused: false, taskLabel: '' });
   const [expanded, setExpanded] = useState(false);
   const [plan, setPlan] = useState<TodayPlan | null>(null);
-  const [recents, setRecents] = useState<RecentTodo[]>([]);
   const [autoDim, setAutoDim] = useState(false);
   const [dimmed, setDimmed] = useState(false);
   const [notes, setNotes] = useState('');
@@ -45,10 +44,10 @@ export default function MiniTimerApp() {
     return () => { window.zenstate.removeAllListeners(IPC.TIMER_UPDATE); };
   }, []);
 
-  // ── Load plan + recents + settings; subscribe to changes ─────
+  // ── Load plan + settings; subscribe to changes ─────
   useEffect(() => {
-    (window as any).zenstate.todayGet?.().then((res: { plan: TodayPlan; recents: RecentTodo[] }) => {
-      if (res) { setPlan(res.plan); setRecents(res.recents); }
+    (window as any).zenstate.todayGet?.().then((res: { plan: TodayPlan }) => {
+      if (res) setPlan(res.plan);
     }).catch(() => {});
     (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
       setAutoDim(!!s?.miniTimerAutoDim);
@@ -113,6 +112,24 @@ export default function MiniTimerApp() {
     }, 350);
   }, []);
 
+  // Flush any pending debounced save synchronously. Used at Stop time so the
+  // last few keystrokes don't get dropped when the user hits Stop within the
+  // 350ms debounce window.
+  const flushNotes = useCallback(() => {
+    if (notesSaveTimerRef.current) {
+      clearTimeout(notesSaveTimerRef.current);
+      notesSaveTimerRef.current = null;
+      window.zenstate.miniTimerSetNotes(notes);
+    }
+  }, [notes]);
+
+  // Stop the timer, but flush pending notes first so they survive into the
+  // saved session + the timesheet confirm popup.
+  const handleStop = useCallback(() => {
+    flushNotes();
+    window.zenstate.stopTimer();
+  }, [flushNotes]);
+
   // Flush any pending debounced save on unmount (e.g. window closed, timer stopped).
   useEffect(() => {
     return () => {
@@ -133,14 +150,14 @@ export default function MiniTimerApp() {
       // Compute dynamic height: pill (36) + notes section (~110) + a row per
       // switchable item (≈50) + a bit of slack for headings/padding. Capped so
       // the pill never balloons past a reasonable size on small screens.
-      const itemCount = (plan?.items.length ?? 0) + Math.min(recents.length, 4);
+      const itemCount = plan?.items.length ?? 0;
       const switcherHeight = itemCount > 0 ? 24 + 50 * itemCount + 16 : 56;
       const height = Math.min(520, 36 + NOTES_SECTION_H + switcherHeight);
       window.zenstate.miniTimerResize({ width: EXPANDED_W, height });
     } else {
       window.zenstate.miniTimerResize({ width: COMPACT_W, height: COMPACT_H });
     }
-  }, [expanded, plan, recents]);
+  }, [expanded, plan]);
 
   // Collapse if nothing is running anymore (avoid orphaned expanded state).
   useEffect(() => {
@@ -206,29 +223,20 @@ export default function MiniTimerApp() {
   const switchToPinned = useCallback((p: PinnedTodo) => {
     // Stop the current timer first; the new one starts cleanly so the
     // pre-flight Basecamp confirmation can run on the outgoing session.
-    if (timer.isRunning) window.zenstate.stopTimer();
-    // Slight delay so the stop fires before the new start (single timer model).
-    setTimeout(() => {
-      window.zenstate.startTimer(p.content, undefined, undefined, {
-        accountId: p.accountId, projectId: p.projectId, todoId: p.todoId,
-        todoListId: p.todoListId, projectName: p.projectName,
-      });
-    }, 50);
+    // ipcRenderer.send preserves order from a single renderer, and main's
+    // stopTimer flips its running flag synchronously, so back-to-back
+    // calls are safe (no setTimeout dance needed).
+    if (timer.isRunning) {
+      flushNotes();
+      window.zenstate.stopTimer();
+    }
+    window.zenstate.startTimer(p.content, undefined, undefined, {
+      accountId: p.accountId, projectId: p.projectId, todoId: p.todoId,
+      todoListId: p.todoListId, projectName: p.projectName,
+    });
     setExpanded(false);
     window.zenstate.miniTimerResize({ width: COMPACT_W, height: COMPACT_H });
-  }, [timer.isRunning]);
-
-  const switchToRecent = useCallback((r: RecentTodo) => {
-    if (timer.isRunning) window.zenstate.stopTimer();
-    setTimeout(() => {
-      window.zenstate.startTimer(r.content, undefined, undefined, {
-        accountId: r.accountId, projectId: r.projectId, todoId: r.todoId,
-        todoListId: r.todoListId, projectName: r.projectName,
-      });
-    }, 50);
-    setExpanded(false);
-    window.zenstate.miniTimerResize({ width: COMPACT_W, height: COMPACT_H });
-  }, [timer.isRunning]);
+  }, [timer.isRunning, flushNotes]);
 
   // ── Render ────────────────────────────────────────────────────
   const accent = timer.isPaused ? 'var(--status-occupied, #ff9500)' : 'var(--status-available, #34c759)';
@@ -237,7 +245,6 @@ export default function MiniTimerApp() {
 
   // Filter out the currently-running task from switch options to avoid noise.
   const switchablePinned = (plan?.items ?? []).filter((p) => p.content !== timer.taskLabel);
-  const switchableRecents = recents.filter((r) => r.content !== timer.taskLabel).slice(0, 4);
 
   return (
     <div
@@ -317,7 +324,7 @@ export default function MiniTimerApp() {
         </IconBtn>
 
         {/* Stop */}
-        <IconBtn title="Stop" onClick={() => window.zenstate.stopTimer()}>
+        <IconBtn title="Stop" onClick={handleStop}>
           <Square size={12} />
         </IconBtn>
       </div>
@@ -367,32 +374,19 @@ export default function MiniTimerApp() {
             />
           </div>
 
-          {switchablePinned.length === 0 && switchableRecents.length === 0 ? (
+          {switchablePinned.length === 0 ? (
             <div style={{ padding: '14px 12px', fontSize: 11, color: 'rgba(230,237,243,0.55)', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <Briefcase size={11} /> Nothing else pinned. Plan a few in Today.
             </div>
           ) : (
             <>
-              {switchablePinned.length > 0 && (
-                <SectionHeading>Today</SectionHeading>
-              )}
+              <SectionHeading>Today</SectionHeading>
               {switchablePinned.map((p) => (
                 <SwitchRow
                   key={`p-${p.todoId}`}
                   title={p.content}
                   subtitle={p.projectName}
                   onClick={() => switchToPinned(p)}
-                />
-              ))}
-              {switchableRecents.length > 0 && (
-                <SectionHeading>Recent</SectionHeading>
-              )}
-              {switchableRecents.map((r) => (
-                <SwitchRow
-                  key={`r-${r.todoId}`}
-                  title={r.content}
-                  subtitle={r.projectName}
-                  onClick={() => switchToRecent(r)}
                 />
               ))}
             </>

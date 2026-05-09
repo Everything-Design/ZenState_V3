@@ -1,7 +1,33 @@
 import crypto from 'crypto';
 import os from 'os';
 import Store from 'electron-store';
+import { safeStorage } from 'electron';
 import { LicensePayload, LicenseState } from '../../shared/types';
+
+// Wrap the license key on disk with safeStorage (Keychain on mac / DPAPI on
+// Windows). Falls back to plaintext only when the OS keystore is unavailable;
+// the warning is emitted once per session.
+let warnedLicenseNoEncryption = false;
+function encryptLicenseKey(key: string): string {
+  if (safeStorage.isEncryptionAvailable()) {
+    return 'enc:' + safeStorage.encryptString(key).toString('base64');
+  }
+  if (!warnedLicenseNoEncryption) {
+    console.warn('[License] safeStorage unavailable — license key stored as plaintext on disk');
+    warnedLicenseNoEncryption = true;
+  }
+  return key;
+}
+function decryptLicenseKey(stored: string): string {
+  if (stored.startsWith('enc:')) {
+    try {
+      return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'));
+    } catch {
+      return '';
+    }
+  }
+  return stored;
+}
 
 // Ed25519 public key for license verification (PEM format)
 // The corresponding private key is kept offline in scripts/keys/private.pem
@@ -38,7 +64,7 @@ export class LicenseManager {
   activateLicense(key: string): LicenseState {
     const state = this.validateKey(key);
     if (state.isValid) {
-      licenseStore.set('licenseKey', key);
+      licenseStore.set('licenseKey', encryptLicenseKey(key));
 
       if (state.isAdmin) {
         licenseStore.set('deviceFingerprint', getDeviceFingerprint());
@@ -57,8 +83,18 @@ export class LicenseManager {
   getLicenseState(): LicenseState {
     if (this.cachedState) return this.cachedState;
 
-    const storedKey = licenseStore.get('licenseKey') as string | null;
+    const stored = licenseStore.get('licenseKey') as string | null;
+    if (!stored) {
+      const free: LicenseState = { isValid: false, isPro: false, isAdmin: false, payload: null };
+      this.cachedState = free;
+      return free;
+    }
+
+    const storedKey = decryptLicenseKey(stored);
     if (!storedKey) {
+      // Encryption marker present but decrypt failed (Keychain rotated, etc.) —
+      // wipe the corrupted entry so the user can re-activate.
+      licenseStore.set('licenseKey', null);
       const free: LicenseState = { isValid: false, isPro: false, isAdmin: false, payload: null };
       this.cachedState = free;
       return free;

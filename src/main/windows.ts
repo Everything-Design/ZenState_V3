@@ -129,19 +129,38 @@ export function createMiniTimerWindow(url: string, position?: { x: number; y: nu
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.setAlwaysOnTop(true, 'screen-saver');
   } else {
-    win.setAlwaysOnTop(true);
+    // 'screen-saver' is also the highest standard level on Windows — without
+    // it the pill won't sit above full-screen exclusive apps (presentations,
+    // games). Electron documents this argument as cross-platform.
+    win.setAlwaysOnTop(true, 'screen-saver');
   }
 
   // Default position: top-right of primary display, 60px below the work area
   // top edge so it clears the menu bar and notch area on MacBooks.
-  if (position) {
+  // If a saved position is supplied, validate it lies inside *some* current
+  // display's work area — common Windows scenario: pill was on a secondary
+  // monitor that's no longer connected, so the saved coordinates would spawn
+  // it off-screen.
+  const { screen } = require('electron');
+  const computeDefaultPos = () => {
+    const display = screen.getPrimaryDisplay();
+    return {
+      x: display.workArea.x + display.workArea.width - width - 20,
+      y: display.workArea.y + 60,
+    };
+  };
+  const isPositionVisible = (x: number, y: number): boolean => {
+    return screen.getAllDisplays().some((d: { workArea: { x: number; y: number; width: number; height: number } }) => {
+      const wa = d.workArea;
+      // Require the entire pill rect to fit, not just a corner.
+      return x >= wa.x && y >= wa.y && (x + width) <= (wa.x + wa.width) && (y + height) <= (wa.y + wa.height);
+    });
+  };
+  if (position && isPositionVisible(position.x, position.y)) {
     win.setPosition(position.x, position.y);
   } else {
-    const { screen } = require('electron');
-    const display = screen.getPrimaryDisplay();
-    const x = display.workArea.x + display.workArea.width - width - 20;
-    const y = display.workArea.y + 60;
-    win.setPosition(x, y);
+    const def = computeDefaultPos();
+    win.setPosition(def.x, def.y);
   }
 
   win.loadURL(url);

@@ -88,6 +88,32 @@ const IPC = {
   TOMORROW_CHANGED: 'tomorrow:changed',
 } as const;
 
+// Channels the renderer is allowed to subscribe to (and detach from). Any
+// channel outside this list is silently ignored — prevents a renderer from
+// silencing main's own internal handlers like 'app:install-update'.
+const LISTEN_CHANNELS: string[] = [
+  IPC.PEER_DISCOVERED, IPC.PEER_UPDATED, IPC.PEER_LOST,
+  IPC.MEETING_REQUEST, IPC.MEETING_REQUEST_CANCEL, IPC.MEETING_RESPONSE,
+  IPC.EMERGENCY_REQUEST, IPC.EMERGENCY_ACCESS,
+  IPC.TIMER_UPDATE,
+  IPC.TIMER_COMPLETE,
+  IPC.BREAK_REMINDER,
+  IPC.TIMER_AUTO_PAUSED,
+  IPC.STATUS_REVERT_TICK,
+  'alert-data',
+  'user:logged-in',
+  'update:available',
+  'update:downloaded',
+  'dashboard:switch-tab',
+  'settings:updated',
+  'license:changed',
+  IPC.BC_AUTH_CHANGED,
+  'basecamp:timesheet-updated',
+  IPC.TODAY_CHANGED,
+  IPC.TOMORROW_CHANGED,
+  IPC.TEAM_PING_RECEIVED,
+];
+
 // Expose safe IPC bridge to renderer
 contextBridge.exposeInMainWorld('zenstate', {
   // Invoke (request-response)
@@ -183,36 +209,19 @@ contextBridge.exposeInMainWorld('zenstate', {
   getLoginItemSettings: () => ipcRenderer.invoke('settings:get-login-item'),
   setLoginItemSettings: (enabled: boolean) => ipcRenderer.send('settings:set-login-item', enabled),
 
-  // Listen (main → renderer events)
+  // Listen (main → renderer events). Both `on` and `removeAllListeners` use
+  // the same allowlist so a stray renderer call can't subscribe to or silence
+  // arbitrary channels like 'app:install-update'.
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    const validChannels = [
-      IPC.PEER_DISCOVERED, IPC.PEER_UPDATED, IPC.PEER_LOST,
-      IPC.MEETING_REQUEST, IPC.MEETING_REQUEST_CANCEL, IPC.MEETING_RESPONSE,
-      IPC.EMERGENCY_REQUEST, IPC.EMERGENCY_ACCESS,
-      IPC.TIMER_UPDATE,
-      IPC.TIMER_COMPLETE,
-      IPC.BREAK_REMINDER,
-      IPC.TIMER_AUTO_PAUSED,
-      IPC.STATUS_REVERT_TICK,
-      'alert-data',
-      'update:available',
-      'update:downloaded',
-      'dashboard:switch-tab',
-      'settings:updated',
-      'license:changed',
-      IPC.BC_AUTH_CHANGED,
-      'basecamp:timesheet-updated',
-      IPC.TODAY_CHANGED,
-      IPC.TOMORROW_CHANGED,
-      IPC.TEAM_PING_RECEIVED,
-    ];
-    if (validChannels.includes(channel)) {
+    if (LISTEN_CHANNELS.includes(channel)) {
       ipcRenderer.on(channel, (_event, ...args) => callback(...args));
     }
   },
 
   removeAllListeners: (channel: string) => {
-    ipcRenderer.removeAllListeners(channel);
+    if (LISTEN_CHANNELS.includes(channel)) {
+      ipcRenderer.removeAllListeners(channel);
+    }
   },
 
   // Platform info

@@ -111,6 +111,12 @@ export default function App() {
       setLicenseState(state as LicenseState);
     });
 
+    // Refresh local state if the other window just logged in/out so we don't
+    // sit on a stale LoginView (or stale dashboard) after the user transitions.
+    window.zenstate.on('user:logged-in', (user: unknown) => {
+      setCurrentUser(user as User);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
@@ -120,6 +126,7 @@ export default function App() {
       window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
       window.zenstate.removeAllListeners('update:downloaded');
       window.zenstate.removeAllListeners('license:changed');
+      window.zenstate.removeAllListeners('user:logged-in');
     };
   }, []);
 

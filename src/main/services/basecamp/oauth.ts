@@ -71,6 +71,14 @@ export class BasecampOAuth extends EventEmitter {
   private pendingCallback: ((result: { code?: string; state?: string; error?: string }) => void) | null = null;
   private server: http.Server | null = null;
   private timeoutHandle: NodeJS.Timeout | null = null;
+  // Memoize an in-flight refresh so two simultaneous API calls hitting an
+  // expired token don't both POST to /authorization/token — Basecamp
+  // invalidates the refresh_token on first use, so the second call would 401
+  // and trigger an unwanted disconnect/sign-out.
+  private refreshInFlight: Promise<string> | null = null;
+  // Same idea for the OAuth connect flow — the local callback server binds
+  // to a fixed port (53682), so two concurrent connects collide on EADDRINUSE.
+  private connectInFlight: Promise<void> | null = null;
 
   // ── Credentials (BYO Client ID + Secret) ────────────────────────
 
@@ -144,6 +152,18 @@ export class BasecampOAuth extends EventEmitter {
   // ── OAuth flow ──────────────────────────────────────────────────
 
   async connect(): Promise<void> {
+    // Prevent concurrent connect() calls — the loopback callback server binds
+    // to a fixed port (53682), so a second call while one is in flight would
+    // EADDRINUSE and leave the user with a partially-failed flow.
+    if (this.connectInFlight) return this.connectInFlight;
+
+    this.connectInFlight = this.runConnect().finally(() => {
+      this.connectInFlight = null;
+    });
+    return this.connectInFlight;
+  }
+
+  private async runConnect(): Promise<void> {
     const creds = this.getCredentials();
     if (!creds || !creds.clientId || !creds.clientSecret) {
       throw new Error('Basecamp client ID and secret must be saved first');
@@ -195,11 +215,19 @@ export class BasecampOAuth extends EventEmitter {
           const state = url.searchParams.get('state') ?? undefined;
           const error = url.searchParams.get('error') ?? undefined;
 
+          // Escape the error param before reflecting it into the HTML —
+          // Basecamp normally sends short codes like "access_denied" but a
+          // hostile redirect could include arbitrary text/markup.
+          const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => (
+            c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
+          ));
+          const safeError = error ? escapeHtml(error) : null;
+
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(`<!doctype html><html><head><meta charset="utf-8"><title>ZenState</title>
             <style>body{font:14px -apple-system,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0d1117;color:#e6edf3}.box{text-align:center;padding:40px}.box h1{margin:0 0 8px;font-size:18px}.box p{margin:0;opacity:.7}</style></head>
-            <body><div class="box"><h1>${error ? 'Connection failed' : 'ZenState connected to Basecamp'}</h1>
-            <p>${error ? error : 'You can close this window and return to ZenState.'}</p></div></body></html>`);
+            <body><div class="box"><h1>${safeError ? 'Connection failed' : 'ZenState connected to Basecamp'}</h1>
+            <p>${safeError ? safeError : 'You can close this window and return to ZenState.'}</p></div></body></html>`);
 
           this.pendingCallback?.({ code, state, error });
         } catch (err) {
@@ -266,38 +294,49 @@ export class BasecampOAuth extends EventEmitter {
   }
 
   private async refreshAccessToken(): Promise<string> {
-    const auth = this.getStoredAuth();
-    const creds = this.getCredentials();
-    if (!auth || !creds) throw new Error('Basecamp is not connected');
+    // If a refresh is already in flight, share its promise — Basecamp burns
+    // the refresh_token on first use, so two parallel POSTs would race and
+    // the loser would 401 → disconnect.
+    if (this.refreshInFlight) return this.refreshInFlight;
 
-    const refreshToken = decrypt(auth.refreshToken);
-    const params = new URLSearchParams({
-      type: 'refresh',
-      refresh_token: refreshToken,
-      client_id: creds.clientId,
-      redirect_uri: BC_REDIRECT_URI,
-      client_secret: creds.clientSecret,
-    });
-    const res = await fetch(`${BC_TOKEN_URL}?${params.toString()}`, {
-      method: 'POST',
-      headers: { 'User-Agent': BC_USER_AGENT },
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      this.disconnect();
-      throw new Error(`Token refresh failed (${res.status}): ${body}`);
-    }
-    const data = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };
+    this.refreshInFlight = (async () => {
+      const auth = this.getStoredAuth();
+      const creds = this.getCredentials();
+      if (!auth || !creds) throw new Error('Basecamp is not connected');
 
-    const updated: StoredAuth = {
-      ...auth,
-      accessToken: encrypt(data.access_token),
-      refreshToken: data.refresh_token ? encrypt(data.refresh_token) : auth.refreshToken,
-      expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
-    };
-    store.set('basecampAuth', updated);
-    this.emit('authChanged');
-    return data.access_token;
+      const refreshToken = decrypt(auth.refreshToken);
+      const params = new URLSearchParams({
+        type: 'refresh',
+        refresh_token: refreshToken,
+        client_id: creds.clientId,
+        redirect_uri: BC_REDIRECT_URI,
+        client_secret: creds.clientSecret,
+      });
+      const res = await fetch(`${BC_TOKEN_URL}?${params.toString()}`, {
+        method: 'POST',
+        headers: { 'User-Agent': BC_USER_AGENT },
+      });
+      if (!res.ok) {
+        const body = await res.text();
+        this.disconnect();
+        throw new Error(`Token refresh failed (${res.status}): ${body}`);
+      }
+      const data = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };
+
+      const updated: StoredAuth = {
+        ...auth,
+        accessToken: encrypt(data.access_token),
+        refreshToken: data.refresh_token ? encrypt(data.refresh_token) : auth.refreshToken,
+        expiresAt: new Date(Date.now() + data.expires_in * 1000).toISOString(),
+      };
+      store.set('basecampAuth', updated);
+      this.emit('authChanged');
+      return data.access_token;
+    })().finally(() => {
+      this.refreshInFlight = null;
+    });
+
+    return this.refreshInFlight;
   }
 
   private async fetchAuthInfo(accessToken: string): Promise<{

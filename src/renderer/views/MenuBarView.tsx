@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
-import { User, AvailabilityStatus, IPC, LicenseState, RecentTodo, TodayPlan, PinnedTodo, ReceivedPing } from '../../shared/types';
+import { Settings, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
+import { User, AvailabilityStatus, IPC, LicenseState, TodayPlan, PinnedTodo, ReceivedPing } from '../../shared/types';
 import SendPingSheet from '../components/SendPingSheet';
 
 const STATUS_SUGGESTIONS = ['In a meeting', 'Lunch break', 'Be right back', 'Deep work'];
@@ -93,8 +93,6 @@ function formatRelative(iso: string): string {
 
 export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings, onOpenProjects }: Props) {
   const [searchText, setSearchText] = useState('');
-  const [showTimerInput, setShowTimerInput] = useState(false);
-  const [timerTaskInput, setTimerTaskInput] = useState('');
   const [showStatusMessage, setShowStatusMessage] = useState(false);
   const [statusMessageInput, setStatusMessageInput] = useState('');
   const [statusDuration, setStatusDuration] = useState(DURATION_OPTIONS[0]);
@@ -102,7 +100,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   const [messagePopup, setMessagePopup] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [showRevertPicker, setShowRevertPicker] = useState(false);
-  const [recents, setRecents] = useState<RecentTodo[]>([]);
   const [todayPlan, setTodayPlan] = useState<TodayPlan | null>(null);
   // Two modes for the popover body: "today" (your plan) vs "team" (peer presence).
   // Default to Today since that's the daily-ritual surface. A useEffect below
@@ -112,14 +109,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   const [tabAutoChosen, setTabAutoChosen] = useState(false);
   const [showPingSheet, setShowPingSheet] = useState(false);
   const [recentPings, setRecentPings] = useState<ReceivedPing[]>([]);
-
-  // Load recent Basecamp todos when the timer input opens, so the user can
-  // one-tap restart a recent task without drilling Project → List → Todo.
-  useEffect(() => {
-    if (showTimerInput) {
-      (window as any).zenstate.recentsGet?.().then((rs: RecentTodo[]) => setRecents(rs ?? [])).catch(() => {});
-    }
-  }, [showTimerInput]);
 
   // Load Today's plan and stay subscribed to changes so the popover shows
   // pinned to-dos as soon as the user pins/unpins from the Dashboard.
@@ -167,18 +156,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
     });
   }
 
-  function handleStartFromRecent(r: RecentTodo) {
-    window.zenstate.startTimer(r.content, undefined, undefined, {
-      accountId: r.accountId,
-      projectId: r.projectId,
-      todoId: r.todoId,
-      todoListId: r.todoListId,
-      projectName: r.projectName,
-    });
-    setShowTimerInput(false);
-    setTimerTaskInput('');
-  }
-
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
     const handler = (data: unknown) => {
@@ -222,14 +199,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   }, [onlinePeers, searchText]);
 
   const isTimerActive = timerState.isRunning || timerState.isPaused;
-
-  function handleStartTimer() {
-    const label = timerTaskInput.trim();
-    if (!label) return; // task label is now the only required field
-    window.zenstate.startTimer(label);
-    setTimerTaskInput('');
-    setShowTimerInput(false);
-  }
 
   function handleSetStatusMessage() {
     if (!statusMessageInput.trim()) return;
@@ -351,91 +320,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
     );
   }
 
-  // ── Timer Input View ───────
-  if (showTimerInput && !isTimerActive) {
-    return (
-      <div className="popover fade-in">
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div className="hstack" style={{ gap: 8 }}>
-            <button className="footer-btn" onClick={() => setShowTimerInput(false)}>
-              ‹ Back
-            </button>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Record Time</span>
-          </div>
-
-          <input
-            className="text-input"
-            placeholder="What are you working on?"
-            value={timerTaskInput}
-            onChange={(e) => setTimerTaskInput(e.target.value)}
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleStartTimer();
-            }}
-          />
-
-          {/* Recents — one-tap restart of recently-used Basecamp todos */}
-          {recents.length > 0 && (
-            <div>
-              <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', textTransform: 'uppercase', letterSpacing: 0.6, fontWeight: 600, marginBottom: 6 }}>
-                Recent
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {recents.slice(0, 5).map((r) => (
-                  <button
-                    key={r.todoId}
-                    onClick={() => handleStartFromRecent(r)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      background: 'var(--zen-tertiary-bg)',
-                      border: '1px solid var(--zen-divider)',
-                      color: 'var(--zen-text)',
-                      fontSize: 'var(--text-sm)',
-                      fontFamily: 'inherit',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard)',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.18)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--zen-tertiary-bg)'; e.currentTarget.style.borderColor = 'var(--zen-divider)'; }}
-                  >
-                    <Play size={11} style={{ color: 'var(--status-available)', flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.content}</div>
-                      {r.projectName && (
-                        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-                          {r.projectName}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="hstack" style={{ gap: 8 }}>
-            <button
-              className="btn btn-secondary"
-              onClick={() => { setShowTimerInput(false); setTimerTaskInput(''); }}
-            >
-              Cancel
-            </button>
-            <div className="spacer" />
-            <button
-              className="btn btn-primary"
-              onClick={handleStartTimer}
-              disabled={!timerTaskInput.trim()}
-            >
-              Start
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="popover">
@@ -924,9 +808,6 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         <div className="footer-utils">
           <button className="footer-icon-btn" onClick={() => window.zenstate.openDashboard('settings')} title="Settings">
             <Settings size={15} />
-          </button>
-          <button className="footer-icon-btn" onClick={() => setShowTimerInput(true)} title="Record Time">
-            <Timer size={15} />
           </button>
           {onOpenProjects && (
             <button className="footer-icon-btn" onClick={onOpenProjects} title="Projects">

@@ -206,6 +206,12 @@ export default function DashboardApp() {
       setLicenseState(state as LicenseState);
     });
 
+    // If the other window just logged in, sync our state so we don't sit on
+    // a stale LoginView while the popover already shows the dashboard.
+    window.zenstate.on('user:logged-in', (user: unknown) => {
+      setCurrentUser(user as User);
+    });
+
     return () => {
       window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
       window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
@@ -216,6 +222,7 @@ export default function DashboardApp() {
       window.zenstate.removeAllListeners('update:downloaded');
       window.zenstate.removeAllListeners('dashboard:switch-tab');
       window.zenstate.removeAllListeners('license:changed');
+      window.zenstate.removeAllListeners('user:logged-in');
     };
   }, [currentUser]);
 

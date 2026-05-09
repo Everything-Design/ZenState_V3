@@ -67,6 +67,11 @@ let pendingTimesheetEntry: {
   durationSec: number;
 } | null = null;
 
+// Track the active timesheet confirm + long-run-guard alert windows so we can
+// detect close-via-X (treat as discard + notify) and force-close on sign-out.
+let timesheetConfirmAlertWin: BrowserWindow | null = null;
+let longRunAlertWin: BrowserWindow | null = null;
+
 // Break reminder state
 let breakReminderTimeout: NodeJS.Timeout | null = null;
 
@@ -647,7 +652,11 @@ function startTimer(taskLabel: string, category?: string, targetDuration?: numbe
         targetDuration: timerTargetDuration,
         remaining,
       });
-      updateTrayIcon(persistence.getUser()!, elapsed, true);
+      // Don't bang-assert the user — sign-out may have just nulled it while
+      // the interval was already scheduled. Skip the tray update in that
+      // racing window; stopTimer's reset will clear the tray on next tick.
+      const tickUser = persistence.getUser();
+      if (tickUser) updateTrayIcon(tickUser, elapsed, true);
 
       // Long-run guard — once per session, prompt the user when they cross
       // the threshold so a forgotten timer can't quietly pollute the timesheet.
@@ -676,6 +685,7 @@ function showLongRunAlert(elapsedSeconds: number) {
     width: 380,
     height: 320,
   });
+  longRunAlertWin = alertWin;
   alertWin.webContents.once('did-finish-load', () => {
     alertWin.webContents.send('alert-data', {
       type: 'longRunGuard',
@@ -685,6 +695,13 @@ function showLongRunAlert(elapsedSeconds: number) {
       lastActivityAt: lastActivityIsoTime(),
     });
   });
+  // If the user dismisses the alert with the OS X without picking an option,
+  // treat it as "continue working" (least-destructive default) and reset the
+  // guard so the prompt can re-fire after another threshold's worth of time.
+  alertWin.on('closed', () => {
+    if (longRunAlertWin === alertWin) longRunAlertWin = null;
+    if (timerIsRunning) longRunGuardFired = false;
+  });
 }
 
 function showTimesheetConfirmAlert(taskLabel: string, durationSec: number, notes?: string) {
@@ -692,6 +709,7 @@ function showTimesheetConfirmAlert(taskLabel: string, durationSec: number, notes
     width: 400,
     height: 460,
   });
+  timesheetConfirmAlertWin = alertWin;
   alertWin.webContents.once('did-finish-load', () => {
     alertWin.webContents.send('alert-data', {
       type: 'timesheetConfirm',
@@ -703,6 +721,26 @@ function showTimesheetConfirmAlert(taskLabel: string, durationSec: number, notes
       // have to retype what they jotted down mid-session.
       message: notes,
     });
+  });
+  // If the user dismisses the alert with Cmd+W / Alt+F4 / system X without
+  // picking Post or Discard, the local session was already saved with
+  // synced=false. Drop the pending entry and fire a native notification so
+  // the user knows to use Settings → Backfill if they want it on Basecamp.
+  alertWin.on('closed', () => {
+    if (timesheetConfirmAlertWin === alertWin) timesheetConfirmAlertWin = null;
+    if (pendingTimesheetEntry) {
+      const dropped = pendingTimesheetEntry;
+      pendingTimesheetEntry = null;
+      try {
+        new Notification({
+          title: 'Session saved locally',
+          body: `"${dropped.taskLabel}" wasn't sent to Basecamp. Use Settings → Backfill to sync later.`,
+          silent: false,
+        }).show();
+      } catch (err) {
+        console.warn('Failed to show timesheet-dropped notification:', err);
+      }
+    }
   });
 }
 
@@ -761,28 +799,38 @@ function resumeTimer() {
 function stopTimer() {
   if (!timerIsRunning && !timerIsPaused) return;
 
+  // Capture state and flip the running flag immediately so a concurrent caller
+  // (e.g. countdown-complete firing while the user clicks Stop) early-returns
+  // at the guard above instead of double-saving the session.
+  const capturedTaskLabel = timerTaskLabel;
+  const capturedCategory = timerCategory;
+  const capturedBasecamp = timerBasecamp;
+  const capturedNotes = currentSessionNotes.trim();
+  const wasPaused = timerIsPaused;
+  timerIsRunning = false;
+  timerIsPaused = false;
+
   let totalDuration = timerAccumulatedTime;
-  if (timerStartTime) {
+  if (timerStartTime && !wasPaused) {
     totalDuration += (Date.now() - timerStartTime.getTime()) / 1000;
   }
 
   // Save session — persist the Basecamp link so we can mark it synced later
   // (and so it can be backfilled if the push fails or was never attempted).
   const saved = timeTracker.addSession({
-    taskLabel: timerTaskLabel,
-    category: timerCategory,
+    taskLabel: capturedTaskLabel,
+    category: capturedCategory,
     duration: totalDuration,
     startTime: new Date(Date.now() - totalDuration * 1000).toISOString(),
     endTime: new Date().toISOString(),
-    basecamp: timerBasecamp ? { ...timerBasecamp, synced: false } : undefined,
+    basecamp: capturedBasecamp ? { ...capturedBasecamp, synced: false } : undefined,
   });
 
   // If the user jotted notes into the pill during the session, persist them
   // on the local record now — independent of the Basecamp confirm flow, so
   // sessions without a Basecamp link still keep the notes.
-  const sessionNotes = currentSessionNotes.trim();
-  if (sessionNotes) {
-    timeTracker.updateSession(saved.sessionId, saved.dateStr, { notes: sessionNotes });
+  if (capturedNotes) {
+    timeTracker.updateSession(saved.sessionId, saved.dateStr, { notes: capturedNotes });
   }
 
   // Decide what to do with the elapsed time on the Basecamp side.
@@ -791,26 +839,25 @@ function stopTimer() {
   // - confirmation on: park the entry as pending and open the confirmation alert.
   //   The session is already saved locally with synced=false, so a Discard
   //   leaves it as un-synced data the user can backfill later if they change their mind.
-  if (timerBasecamp && totalDuration >= 60) {
+  if (capturedBasecamp && totalDuration >= 60) {
     const settings = persistence.getSettings();
-    const link = timerBasecamp;
-    const taskLabel = timerTaskLabel;
+    const link = capturedBasecamp;
 
     if (settings.requireTimesheetConfirmation) {
       pendingTimesheetEntry = {
         sessionId: saved.sessionId,
         sessionDateStr: saved.dateStr,
         basecamp: link,
-        taskLabel,
+        taskLabel: capturedTaskLabel,
         durationSec: totalDuration,
       };
-      showTimesheetConfirmAlert(taskLabel, totalDuration, sessionNotes);
+      showTimesheetConfirmAlert(capturedTaskLabel, totalDuration, capturedNotes);
     } else {
       const hours = (totalDuration / 3600).toFixed(2);
       const date = isoDateLocal(new Date());
       // If the user wrote notes mid-session, use them as the timesheet entry
       // description — same convention as the confirm-popup path.
-      const description = sessionNotes || taskLabel;
+      const description = capturedNotes || capturedTaskLabel;
       basecamp.api.createTimesheetEntry({
         todoId: link.todoId,
         date,
@@ -823,15 +870,14 @@ function stopTimer() {
     }
   }
 
-  // Reset
+  // Reset (timerIsRunning + timerIsPaused already flipped at the top to make
+  // stopTimer re-entrancy-safe).
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = null;
   timerStartTime = null;
   clearBreakReminder();
   stopIdleDetection();
   timerAccumulatedTime = 0;
-  timerIsPaused = false;
-  timerIsRunning = false;
   timerTaskLabel = '';
   timerCategory = undefined;
   timerTargetDuration = undefined;
@@ -1033,19 +1079,69 @@ function setupIPC() {
     persistence.saveUser(user);
     startNetworking(user);
     updateTrayIcon(user, 0, false);
+    // Re-register global shortcuts here too — sign-out unregisters them, and
+    // a fresh app start hits the registerShortcuts() call from app.on('ready'),
+    // but the sign-out → sign-in path on the same process needs a manual nudge.
+    registerShortcuts();
     // Default Launch at Login to ON for new users
     app.setLoginItemSettings({ openAtLogin: true });
+    // Notify the other window — the popover and dashboard each render their
+    // own LoginView when currentUser is null, so when one of them logs in the
+    // other needs to refresh its state instead of staying stuck on the form.
+    broadcastToWindows('user:logged-in', user);
   });
 
-  // Sign out
+  // Sign out — comprehensively tear down per-user state so a different user
+  // signing in on the same machine doesn't inherit Basecamp tokens, pinned
+  // todos, recent pings, in-flight timers, or registered global shortcuts.
   ipcMain.on('user:sign-out', () => {
     // Persist any in-progress timer session before tearing down state.
     if (timerIsRunning || timerIsPaused) {
       stopTimer();
     }
+    // Drop any pending timesheet confirmation; the local session was already
+    // saved with synced=false so it can still be backfilled if reconnected.
+    pendingTimesheetEntry = null;
+    currentSessionNotes = '';
+    longRunGuardFired = false;
+
+    // Force-close any open modal alerts so they don't bleed into the next
+    // user's session (timesheet confirm, long-run guard, meeting requests).
+    if (timesheetConfirmAlertWin && !timesheetConfirmAlertWin.isDestroyed()) {
+      timesheetConfirmAlertWin.destroy();
+    }
+    timesheetConfirmAlertWin = null;
+    if (longRunAlertWin && !longRunAlertWin.isDestroyed()) {
+      longRunAlertWin.destroy();
+    }
+    longRunAlertWin = null;
+
+    // Stop background timers tied to user state.
+    cancelStatusRevertTimer();
+    clearBreakReminder();
+    stopIdleDetection();
+
+    // Clear in-memory ping history and hide the floating pill.
+    recentPings = [];
+    if (miniTimerWindow && !miniTimerWindow.isDestroyed()) {
+      miniTimerWindow.hide();
+    }
+
+    // Disconnect Basecamp — this wipes the encrypted auth tokens from disk
+    // so the next user needs to re-OAuth, and broadcasts authChanged so the
+    // renderer reflects the disconnected state.
+    try { basecamp.disconnect(); } catch (err) { console.warn('Basecamp disconnect on sign-out failed:', err); }
+
+    // Tear down networking + delete the user profile.
     networking?.stop();
     networking = null;
     persistence.deleteUser();
+
+    // Unregister + re-register global shortcuts so they no-op until the next
+    // user actually logs in (the handlers guard on persistence.getUser() but
+    // unregistering is the cleaner contract).
+    globalShortcut.unregisterAll();
+
     updateTrayIcon({ status: AvailabilityStatus.Offline } as User, 0, false);
   });
 
@@ -1060,10 +1156,39 @@ function setupIPC() {
   // App version
   ipcMain.handle('app:get-version', () => app.getVersion());
 
-  // Reset all data
+  // Reset all data — wipes everything the app persists locally so the next
+  // launch is functionally identical to a fresh install.
   ipcMain.handle('data:reset-all', () => {
+    // Stop a running timer first so we don't try to save a session into the
+    // store we're about to clear.
+    if (timerIsRunning || timerIsPaused) {
+      stopTimer();
+    }
+    pendingTimesheetEntry = null;
+    currentSessionNotes = '';
+    if (timesheetConfirmAlertWin && !timesheetConfirmAlertWin.isDestroyed()) timesheetConfirmAlertWin.destroy();
+    if (longRunAlertWin && !longRunAlertWin.isDestroyed()) longRunAlertWin.destroy();
+    timesheetConfirmAlertWin = null;
+    longRunAlertWin = null;
+
+    cancelStatusRevertTimer();
+    clearBreakReminder();
+    stopIdleDetection();
+    recentPings = [];
+    if (miniTimerWindow && !miniTimerWindow.isDestroyed()) miniTimerWindow.hide();
+
+    // Wipe persistence — sessions, plans, recents, groups, basecamp, license.
+    // App settings are kept (notification preferences etc. aren't user-data).
     persistence.saveRecords([]);
+    persistence.clearTodayAndRecents();
+    for (const g of persistence.getPeerGroups()) persistence.deletePeerGroup(g.id);
+    try { basecamp.disconnect(); } catch (err) { console.warn('basecamp disconnect on reset failed:', err); }
+    licenseManager.deactivateLicense();
     persistence.deleteUser();
+
+    networking?.stop();
+    networking = null;
+    globalShortcut.unregisterAll();
     return true;
   });
 
@@ -1153,13 +1278,20 @@ function setupIPC() {
     return resized.toPNG().toString('base64');
   });
 
-  // Network: manual IP connection
+  // Network: manual IP connection. Only accepts private/loopback addresses
+  // because ZenState peer presence is intentionally LAN-scoped — and because
+  // an XSS or future untrusted-content surface in the renderer could otherwise
+  // coerce main into TCP-connecting to public/intranet hosts (SSRF).
   ipcMain.handle('network:connect-ip', (_e, data: { host: string; port: number }) => {
-    if (networking) {
-      networking.connectToIP(data.host, data.port);
-      return true;
+    if (!networking) return false;
+    if (typeof data.host !== 'string' || !data.host) return false;
+    if (typeof data.port !== 'number' || data.port < 1024 || data.port > 65535) return false;
+    if (!isPrivateOrLoopback(data.host)) {
+      console.warn(`Rejecting connect-ip to non-private host: ${data.host}`);
+      return false;
     }
-    return false;
+    networking.connectToIP(data.host, data.port);
+    return true;
   });
 
   // Network: get local info
@@ -1592,6 +1724,30 @@ function setupIPC() {
     const [x, y] = miniTimerWindow.getPosition();
     miniTimerWindow.setPosition(Math.round(x + delta.dx), Math.round(y + delta.dy));
   });
+}
+
+// True if `host` is a private IPv4 (RFC1918), loopback, or link-local address.
+// Used to gate the manual-IP connect IPC so renderer code can't coerce main
+// into reaching public or cloud-metadata endpoints.
+function isPrivateOrLoopback(host: string): boolean {
+  // Strip surrounding whitespace and any IPv6 zone id.
+  const h = host.trim().toLowerCase();
+  if (h === 'localhost') return true;
+  // Reject obvious unsafe sentinels.
+  if (h === '0.0.0.0' || h === '::' || h === '169.254.169.254') return false;
+  // IPv6 loopback / link-local
+  if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true;
+  // IPv4 octet match
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!m) return false;
+  const a = +m[1], b = +m[2];
+  if ([a, b, +m[3], +m[4]].some((n) => n < 0 || n > 255)) return false;
+  if (a === 10) return true;                       // 10.0.0.0/8
+  if (a === 127) return true;                      // 127.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;          // 192.168.0.0/16
+  if (a === 169 && b === 254) return true;          // 169.254.0.0/16 link-local
+  return false;
 }
 
 // Format Date as YYYY-MM-DD in local timezone (Basecamp expects ISO date, not datetime).
