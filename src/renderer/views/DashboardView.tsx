@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Users, ClipboardList, Settings, MessageCircle, Briefcase, Sun } from 'lucide-react';
+import { Users, ClipboardList, Settings, MessageCircle, Briefcase, CalendarDays } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord, LicenseState } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimesheetTab from './dashboard/TimesheetTab';
 import SettingsTab from './dashboard/SettingsTab';
 import ProjectsTab from './dashboard/ProjectsTab';
-import TodayTab from './dashboard/TodayTab';
+import PlanTab from './dashboard/PlanTab';
 
 interface TimerState {
   elapsed: number;
@@ -58,7 +58,7 @@ function getStatusLabel(status: AvailabilityStatus): string {
   }
 }
 
-type Tab = 'today' | 'team' | 'timesheet' | 'projects' | 'settings';
+type Tab = 'plan' | 'team' | 'timesheet' | 'projects' | 'settings';
 
 function formatRevertTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -68,11 +68,15 @@ function formatRevertTime(seconds: number): string {
 }
 
 export default function DashboardView({ currentUser, peers, timerState, records, statusRevertRemaining, requestedTab, isPro, licenseState, onLicenseStateChange, onRequestedTabHandled, onRefreshRecords, onStatusChange, onUserUpdate, onSignOut }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('today');
+  const [activeTab, setActiveTab] = useState<Tab>('plan');
 
   useEffect(() => {
-    if (requestedTab && ['today', 'team', 'timesheet', 'projects', 'settings'].includes(requestedTab)) {
-      setActiveTab(requestedTab as Tab);
+    if (!requestedTab) return;
+    // Legacy "today" requests (from older code paths or notifications) still
+    // route to the renamed Plan tab so deep-links don't break.
+    const normalised = requestedTab === 'today' ? 'plan' : requestedTab;
+    if (['plan', 'team', 'timesheet', 'projects', 'settings'].includes(normalised)) {
+      setActiveTab(normalised as Tab);
       onRequestedTabHandled?.();
     }
   }, [requestedTab]);
@@ -278,10 +282,10 @@ export default function DashboardView({ currentUser, peers, timerState, records,
         {/* Navigation */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <button
-            className={`tab-btn ${activeTab === 'today' ? 'active' : ''}`}
-            onClick={() => setActiveTab('today')}
+            className={`tab-btn ${activeTab === 'plan' ? 'active' : ''}`}
+            onClick={() => setActiveTab('plan')}
           >
-            <Sun size={16} /> Today
+            <CalendarDays size={16} /> Plan
           </button>
           <button
             className={`tab-btn ${activeTab === 'team' ? 'active' : ''}`}
@@ -316,8 +320,8 @@ export default function DashboardView({ currentUser, peers, timerState, records,
       <div className="dashboard-content">
         {/* Drag strip at top for window dragging */}
         <div className="drag-strip" />
-        {activeTab === 'today' && (
-          <TodayTab
+        {activeTab === 'plan' && (
+          <PlanTab
             timerState={timerState}
             records={records}
             onOpenSettings={() => setActiveTab('settings')}

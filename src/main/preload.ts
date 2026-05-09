@@ -76,8 +76,16 @@ const IPC = {
   TODAY_UNPIN: 'today:unpin',
   TODAY_REORDER: 'today:reorder',
   TODAY_SET_ESTIMATE: 'today:set-estimate',
+  TODAY_TOGGLE_COMPLETE: 'today:toggle-complete',
   TODAY_CHANGED: 'today:changed',
   RECENTS_GET: 'recents:get',
+  TOMORROW_GET: 'tomorrow:get',
+  TOMORROW_PIN: 'tomorrow:pin',
+  TOMORROW_UNPIN: 'tomorrow:unpin',
+  TOMORROW_REORDER: 'tomorrow:reorder',
+  TOMORROW_SET_ESTIMATE: 'tomorrow:set-estimate',
+  TOMORROW_TOGGLE_COMPLETE: 'tomorrow:toggle-complete',
+  TOMORROW_CHANGED: 'tomorrow:changed',
 } as const;
 
 // Expose safe IPC bridge to renderer
@@ -125,6 +133,13 @@ contextBridge.exposeInMainWorld('zenstate', {
   todayUnpin: (todoId: number) => ipcRenderer.invoke(IPC.TODAY_UNPIN, todoId),
   todayReorder: (todoIds: number[]) => ipcRenderer.invoke(IPC.TODAY_REORDER, todoIds),
   todaySetEstimate: (todoId: number, minutes: number | null) => ipcRenderer.invoke(IPC.TODAY_SET_ESTIMATE, { todoId, minutes }),
+  todayToggleComplete: (todoId: number) => ipcRenderer.invoke(IPC.TODAY_TOGGLE_COMPLETE, todoId),
+  tomorrowGet: () => ipcRenderer.invoke(IPC.TOMORROW_GET),
+  tomorrowPin: (item: unknown) => ipcRenderer.invoke(IPC.TOMORROW_PIN, item),
+  tomorrowUnpin: (todoId: number) => ipcRenderer.invoke(IPC.TOMORROW_UNPIN, todoId),
+  tomorrowReorder: (todoIds: number[]) => ipcRenderer.invoke(IPC.TOMORROW_REORDER, todoIds),
+  tomorrowSetEstimate: (todoId: number, minutes: number | null) => ipcRenderer.invoke(IPC.TOMORROW_SET_ESTIMATE, { todoId, minutes }),
+  tomorrowToggleComplete: (todoId: number) => ipcRenderer.invoke(IPC.TOMORROW_TOGGLE_COMPLETE, todoId),
   recentsGet: () => ipcRenderer.invoke(IPC.RECENTS_GET),
 
   // Send (fire-and-forget)
@@ -188,6 +203,7 @@ contextBridge.exposeInMainWorld('zenstate', {
       IPC.BC_AUTH_CHANGED,
       'basecamp:timesheet-updated',
       IPC.TODAY_CHANGED,
+      IPC.TOMORROW_CHANGED,
       IPC.TEAM_PING_RECEIVED,
     ];
     if (validChannels.includes(channel)) {

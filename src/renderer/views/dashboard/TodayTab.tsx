@@ -86,6 +86,11 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
     });
   }, []);
 
+  const handleToggleComplete = useCallback(async (todoId: number) => {
+    const next = await window.zenstate.todayToggleComplete(todoId).catch(() => null);
+    if (next) setPlan(next);
+  }, []);
+
   const isRunning = (item: PinnedTodo) => timerState.isRunning && timerState.taskLabel === item.content;
 
   // Today's sessions — for the "What you've done" section.
@@ -157,6 +162,7 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
                 onStartTimer={() => handleStartTimer(item)}
                 onStopTimer={() => window.zenstate.stopTimer()}
                 onUnpin={() => handleUnpin(item.todoId)}
+                onToggleComplete={() => handleToggleComplete(item.todoId)}
               />
             ))}
             <button
@@ -271,15 +277,17 @@ interface PinnedRowProps {
   onStartTimer: () => void;
   onStopTimer: () => void;
   onUnpin: () => void;
+  onToggleComplete: () => void;
 }
 
 function PinnedRow({
   item, running, trackedToday, editingEstimate,
   onStartEditEstimate, onSaveEstimate, onCancelEditEstimate,
-  onStartTimer, onStopTimer, onUnpin,
+  onStartTimer, onStopTimer, onUnpin, onToggleComplete,
 }: PinnedRowProps) {
   const [estimateInput, setEstimateInput] = useState(String(item.estimateMinutes ?? ''));
   const [hovered, setHovered] = useState(false);
+  const isComplete = !!item.completedAt;
 
   const estimateSec = (item.estimateMinutes ?? 0) * 60;
   const progress = estimateSec > 0 ? Math.min(1, trackedToday / estimateSec) : 0;
@@ -295,22 +303,40 @@ function PinnedRow({
         borderRadius: 'var(--radius-lg)',
         background: running ? 'rgba(48, 209, 88, 0.08)' : 'var(--zen-secondary-bg)',
         border: `1px solid ${running ? 'rgba(48, 209, 88, 0.25)' : 'var(--zen-divider)'}`,
-        transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard)',
+        opacity: isComplete ? 0.55 : 1,
+        transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard), opacity var(--duration-quick) var(--ease-standard)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-        {/* Status dot */}
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%',
-          background: running ? 'var(--status-available)' : 'transparent',
-          border: running ? 'none' : '1.5px solid var(--zen-tertiary-text)',
-          flexShrink: 0,
-          boxShadow: running ? '0 0 8px rgba(48, 209, 88, 0.5)' : 'none',
-        }} />
+        {/* Completion checkbox — clicking toggles done/undone. Local-only flag,
+            not pushed to Basecamp; drives midnight rollover (completed items
+            don't carry into the next day). */}
+        <button
+          onClick={onToggleComplete}
+          title={isComplete ? 'Mark as not done' : 'Mark complete'}
+          style={{
+            width: 18, height: 18, borderRadius: 5,
+            border: isComplete ? 'none' : '1.5px solid var(--zen-tertiary-text)',
+            background: isComplete ? 'var(--status-available)' : 'transparent',
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', padding: 0,
+            transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard)',
+          }}
+          onMouseEnter={(e) => { if (!isComplete) e.currentTarget.style.borderColor = 'var(--zen-text)'; }}
+          onMouseLeave={(e) => { if (!isComplete) e.currentTarget.style.borderColor = 'var(--zen-tertiary-text)'; }}
+        >
+          {isComplete && <Check size={11} color="white" strokeWidth={3} />}
+        </button>
 
         {/* Title + project */}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 'var(--text-md)', fontWeight: 500, color: 'var(--zen-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{
+            fontSize: 'var(--text-md)', fontWeight: 500,
+            color: 'var(--zen-text)',
+            textDecoration: isComplete ? 'line-through' : 'none',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
             {item.content}
           </div>
           <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
@@ -419,15 +445,18 @@ function PinnedRow({
 
 // ── Picker (modal, three-stage cascade with Recents row at top) ─────
 
-interface PinPickerProps {
+export interface PinPickerProps {
   authState: BasecampAuthState;
   recents: RecentTodo[];
   alreadyPinned: Set<number>;
   onPin: (item: PinnedTodo) => void;
   onClose: () => void;
+  // Title shown in the picker header — defaults to "Pin a to-do" but Tomorrow
+  // can override with "Pin to tomorrow" so the surface labels itself correctly.
+  title?: string;
 }
 
-function PinPicker({ authState, recents, alreadyPinned, onPin, onClose }: PinPickerProps) {
+export function PinPicker({ authState, recents, alreadyPinned, onPin, onClose, title }: PinPickerProps) {
   const [step, setStep] = useState<'recents' | 'projects' | 'lists' | 'todos'>('recents');
   const [projects, setProjects] = useState<BasecampProject[]>([]);
   const [lists, setLists] = useState<BasecampTodoList[]>([]);
@@ -518,7 +547,7 @@ function PinPicker({ authState, recents, alreadyPinned, onPin, onClose }: PinPic
             </button>
           )}
           <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, margin: 0, flex: 1, letterSpacing: '-0.01em' }}>
-            {step === 'recents' && 'Pin a to-do'}
+            {step === 'recents' && (title ?? 'Pin a to-do')}
             {step === 'projects' && 'Pick a project'}
             {step === 'lists' && project?.name}
             {step === 'todos' && list?.title}

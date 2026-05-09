@@ -8,7 +8,7 @@ import { NetworkingService } from './networking/NetworkingService';
 import { PersistenceService } from './services/persistence';
 import { TimeTracker } from './services/timeTracker';
 import { setupUpdater, checkForUpdate } from './updater';
-import { IPC, AvailabilityStatus, User, MessageType, AppSettings } from '../shared/types';
+import { IPC, AvailabilityStatus, User, MessageType, AppSettings, PinnedTodo } from '../shared/types';
 import { LicenseManager } from './services/licenseManager';
 import { BasecampService } from './services/basecamp';
 
@@ -1486,7 +1486,79 @@ function setupIPC() {
     return plan;
   });
 
+  // Toggle a today item between complete and incomplete. The flag is local to
+  // ZenState (we don't push it to Basecamp) — its purpose is to drive the
+  // midnight rollover behaviour: completed items get dropped from the next
+  // day's plan, incomplete items carry forward.
+  ipcMain.handle(IPC.TODAY_TOGGLE_COMPLETE, (_e, todoId: number) => {
+    const plan = persistence.getTodayPlan();
+    const item = plan.items.find((p) => p.todoId === todoId);
+    if (item) {
+      if (item.completedAt) delete item.completedAt;
+      else item.completedAt = new Date().toISOString();
+      persistence.saveTodayPlan(plan);
+      broadcastToWindows(IPC.TODAY_CHANGED, plan);
+    }
+    return plan;
+  });
+
   ipcMain.handle(IPC.RECENTS_GET, () => persistence.getRecentTodos());
+
+  // ── Tomorrow plan ─────────────────────────────────────────────
+  // Mirrors the today-plan IPC surface so the same UI patterns work for both.
+  // Items are queued here during the day and promoted to today at midnight.
+
+  ipcMain.handle(IPC.TOMORROW_GET, () => persistence.getTomorrowPlan());
+
+  ipcMain.handle(IPC.TOMORROW_PIN, (_e, item: PinnedTodo) => {
+    const plan = persistence.getTomorrowPlan();
+    if (plan.items.some((p) => p.todoId === item.todoId)) return plan;
+    plan.items.push(item);
+    persistence.saveTomorrowPlan(plan);
+    broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    return plan;
+  });
+
+  ipcMain.handle(IPC.TOMORROW_UNPIN, (_e, todoId: number) => {
+    const plan = persistence.getTomorrowPlan();
+    plan.items = plan.items.filter((p) => p.todoId !== todoId);
+    persistence.saveTomorrowPlan(plan);
+    broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    return plan;
+  });
+
+  ipcMain.handle(IPC.TOMORROW_REORDER, (_e, todoIds: number[]) => {
+    const plan = persistence.getTomorrowPlan();
+    const byId = new Map(plan.items.map((p) => [p.todoId, p]));
+    plan.items = todoIds.map((id) => byId.get(id)).filter(Boolean) as typeof plan.items;
+    persistence.saveTomorrowPlan(plan);
+    broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    return plan;
+  });
+
+  ipcMain.handle(IPC.TOMORROW_SET_ESTIMATE, (_e, data: { todoId: number; minutes: number | null }) => {
+    const plan = persistence.getTomorrowPlan();
+    const item = plan.items.find((p) => p.todoId === data.todoId);
+    if (item) {
+      if (data.minutes === null) delete item.estimateMinutes;
+      else item.estimateMinutes = data.minutes;
+      persistence.saveTomorrowPlan(plan);
+      broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    }
+    return plan;
+  });
+
+  ipcMain.handle(IPC.TOMORROW_TOGGLE_COMPLETE, (_e, todoId: number) => {
+    const plan = persistence.getTomorrowPlan();
+    const item = plan.items.find((p) => p.todoId === todoId);
+    if (item) {
+      if (item.completedAt) delete item.completedAt;
+      else item.completedAt = new Date().toISOString();
+      persistence.saveTomorrowPlan(plan);
+      broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    }
+    return plan;
+  });
 
   // Mini-timer pill resize (renderer-driven). The pill expands to show the
   // task switcher panel and shrinks back to compact when collapsed.

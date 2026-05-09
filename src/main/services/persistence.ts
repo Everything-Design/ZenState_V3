@@ -24,6 +24,7 @@ const store = new Store({
     emergencyGrantedIds: [] as string[],
     appSettings: DEFAULT_APP_SETTINGS,
     todayPlan: null as TodayPlan | null,
+    tomorrowPlan: null as TodayPlan | null,
     recentTodos: [] as RecentTodo[],
     peerGroups: [] as PeerGroup[],
   },
@@ -91,21 +92,70 @@ export class PersistenceService {
     store.set('emergencyGrantedIds', ids);
   }
 
-  // ── Today plan ─────────────────────────────────────────────
-  // Auto-resets at midnight: if the stored plan is from yesterday or earlier,
-  // we return an empty plan for today instead of reviving stale items.
+  // ── Today + Tomorrow plans ─────────────────────────────────
+  // Two slots, one for active work today and one for queued work tomorrow.
+  // At midnight rollover the tomorrow plan merges into today's, plus any
+  // unfinished items from yesterday's today carry forward. Completed items
+  // are dropped (the daily session record already shows what got done).
 
   getTodayPlan(): TodayPlan {
     const today = todayDateStr();
     const stored = store.get('todayPlan') as TodayPlan | null;
-    if (!stored || stored.date !== today) {
-      return { date: today, items: [] };
+    const tomorrow = store.get('tomorrowPlan') as TodayPlan | null;
+
+    if (stored && stored.date === today) {
+      return stored;
     }
-    return stored;
+
+    // Date rolled over (or first run). Build today's plan by merging:
+    //   1. Yesterday's unfinished pinned items (carry forward)
+    //   2. Tomorrow's queued items (now today)
+    // De-duplicated by todoId — if the same todo appears in both, keep the
+    // carry-over (more accurate state since it may already have a partial
+    // estimate or completion history).
+    const carryOver = stored && stored.date < today
+      ? stored.items.filter((item) => !item.completedAt)
+      : [];
+    const promoted = tomorrow?.items ?? [];
+
+    const seen = new Set<number>();
+    const merged: PinnedTodo[] = [];
+    for (const item of [...carryOver, ...promoted]) {
+      if (seen.has(item.todoId)) continue;
+      seen.add(item.todoId);
+      // Strip any stale completedAt on items being promoted from tomorrow —
+      // a fresh day starts fresh.
+      merged.push({ ...item, completedAt: undefined });
+    }
+
+    const newToday: TodayPlan = { date: today, items: merged };
+    // Persist the rolled-over plan so subsequent reads in the same day are
+    // stable, and clear the tomorrow slot now that it's been promoted.
+    store.set('todayPlan', newToday);
+    if (tomorrow) store.set('tomorrowPlan', null);
+    return newToday;
   }
 
   saveTodayPlan(plan: TodayPlan): void {
     store.set('todayPlan', plan);
+  }
+
+  // The tomorrow plan's `date` field is informational only — the rollover
+  // logic above doesn't gate on it (a tomorrow plan written any time before
+  // midnight will simply be promoted on the next read after the date flips).
+  getTomorrowPlan(): TodayPlan {
+    const stored = store.get('tomorrowPlan') as TodayPlan | null;
+    if (!stored) {
+      const t = new Date();
+      t.setDate(t.getDate() + 1);
+      const dateStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+      return { date: dateStr, items: [] };
+    }
+    return stored;
+  }
+
+  saveTomorrowPlan(plan: TodayPlan): void {
+    store.set('tomorrowPlan', plan);
   }
 
   // ── Recent todos ───────────────────────────────────────────
@@ -128,6 +178,7 @@ export class PersistenceService {
   // Used at sign-out / reset; not exposed via IPC.
   clearTodayAndRecents(): void {
     store.set('todayPlan', null);
+    store.set('tomorrowPlan', null);
     store.set('recentTodos', []);
   }
 

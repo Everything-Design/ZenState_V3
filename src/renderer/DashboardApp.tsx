@@ -74,6 +74,13 @@ declare global {
       todayUnpin: (todoId: number) => Promise<TodayPlan>;
       todayReorder: (todoIds: number[]) => Promise<TodayPlan>;
       todaySetEstimate: (todoId: number, minutes: number | null) => Promise<TodayPlan>;
+      todayToggleComplete: (todoId: number) => Promise<TodayPlan>;
+      tomorrowGet: () => Promise<TodayPlan>;
+      tomorrowPin: (item: PinnedTodo) => Promise<TodayPlan>;
+      tomorrowUnpin: (todoId: number) => Promise<TodayPlan>;
+      tomorrowReorder: (todoIds: number[]) => Promise<TodayPlan>;
+      tomorrowSetEstimate: (todoId: number, minutes: number | null) => Promise<TodayPlan>;
+      tomorrowToggleComplete: (todoId: number) => Promise<TodayPlan>;
       recentsGet: () => Promise<RecentTodo[]>;
       on: (channel: string, callback: (...args: unknown[]) => void) => void;
       removeAllListeners: (channel: string) => void;

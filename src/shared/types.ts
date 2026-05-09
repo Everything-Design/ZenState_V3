@@ -167,6 +167,10 @@ export interface PinnedTodo {
   content: string;        // todo title cached at pin time
   projectName: string;    // project name cached at pin time
   estimateMinutes?: number; // optional Newport-style "deep schedule" estimate
+  // Local "I finished this" flag, independent of Basecamp's own completed state.
+  // Toggled from the Plan view; drives midnight rollover (completed items get
+  // dropped, unfinished ones carry to the next day).
+  completedAt?: string;   // ISO timestamp when the user marked it done
 }
 
 export interface TodayPlan {
@@ -349,6 +353,17 @@ export const IPC = {
   TODAY_UNPIN: 'today:unpin',
   TODAY_REORDER: 'today:reorder',
   TODAY_SET_ESTIMATE: 'today:set-estimate',
+  TODAY_TOGGLE_COMPLETE: 'today:toggle-complete',
   TODAY_CHANGED: 'today:changed', // main → renderer
   RECENTS_GET: 'recents:get',
+
+  // Tomorrow plan — same shape as today, separate slot. At midnight rollover,
+  // tomorrow's items merge into today's (along with today's unfinished carry-overs).
+  TOMORROW_GET: 'tomorrow:get',
+  TOMORROW_PIN: 'tomorrow:pin',
+  TOMORROW_UNPIN: 'tomorrow:unpin',
+  TOMORROW_REORDER: 'tomorrow:reorder',
+  TOMORROW_SET_ESTIMATE: 'tomorrow:set-estimate',
+  TOMORROW_TOGGLE_COMPLETE: 'tomorrow:toggle-complete',
+  TOMORROW_CHANGED: 'tomorrow:changed', // main → renderer
 } as const;
