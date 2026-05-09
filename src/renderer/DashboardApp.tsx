@@ -59,6 +59,7 @@ declare global {
       bcGetCredentials: () => Promise<BasecampCredentials | null>;
       bcSaveCredentials: (creds: BasecampCredentials) => Promise<boolean>;
       bcConnect: () => Promise<{ ok: boolean; error?: string; state?: BasecampAuthState }>;
+      bcCancelConnect: () => Promise<boolean>;
       bcDisconnect: () => Promise<BasecampAuthState>;
       bcGetAuthState: () => Promise<BasecampAuthState>;
       bcListProjects: () => Promise<{ ok: boolean; data?: BasecampProject[]; error?: string }>;
@@ -82,7 +83,10 @@ declare global {
       tomorrowSetEstimate: (todoId: number, minutes: number | null) => Promise<TodayPlan>;
       tomorrowToggleComplete: (todoId: number) => Promise<TodayPlan>;
       recentsGet: () => Promise<RecentTodo[]>;
-      on: (channel: string, callback: (...args: unknown[]) => void) => void;
+      // Returns an unsubscribe function — call it in useEffect cleanup to
+      // detach just this listener (instead of nuking every listener on the
+      // channel via removeAllListeners).
+      on: (channel: string, callback: (...args: unknown[]) => void) => () => void;
       removeAllListeners: (channel: string) => void;
     };
   }
@@ -109,9 +113,14 @@ export default function DashboardApp() {
   });
   const [records, setRecords] = useState<DailyRecord[]>([]);
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
+  // Persistent banner shown when Basecamp's refresh-token flow forced a
+  // disconnect (typically because the user revoked the integration on
+  // Basecamp's side, or the refresh token expired). User must reconnect
+  // to resume timesheet syncs.
+  const [needsBasecampReauth, setNeedsBasecampReauth] = useState(false);
   const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
   const [requestedTab, setRequestedTab] = useState<string | undefined>(undefined);
-  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, payload: null });
+  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, isAdmin: false, payload: null });
   const prevTimerRunning = useRef(false);
   const [loading, setLoading] = useState(true);
 
@@ -132,98 +141,81 @@ export default function DashboardApp() {
     init();
   }, []);
 
+  // Each on() returns its own unsubscribe so unmount cleanup detaches only
+  // this component's listeners (the old removeAllListeners pattern would
+  // nuke sibling listeners on the same channel — e.g. a child component in
+  // the dashboard listening on the same event would lose its subscription
+  // when the parent unmounted).
   useEffect(() => {
-    window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
-      const p = peer as User;
-      // Use setState callback to check current user ID without stale closure
-      setCurrentUser((cur) => {
-        if (cur && cur.id === p.id) return cur; // It's us, skip adding to peers
-        // Not us — add to peers
-        setPeers((prev) => {
-          const idx = prev.findIndex((x) => x.id === p.id);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = p;
-            return updated;
-          }
-          return [...prev, p];
+    const offs = [
+      window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
+        const p = peer as User;
+        setCurrentUser((cur) => {
+          if (cur && cur.id === p.id) return cur;
+          setPeers((prev) => {
+            const idx = prev.findIndex((x) => x.id === p.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = p;
+              return updated;
+            }
+            return [...prev, p];
+          });
+          return cur;
         });
-        return cur;
-      });
-    });
-
-    window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
-      const p = peer as User;
-      // Use setState callback to get fresh current user
-      setCurrentUser((cur) => {
-        if (cur && cur.id === p.id) return p; // Update self
-        // Not us — update peers
-        setPeers((prev) => {
-          const idx = prev.findIndex((x) => x.id === p.id);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = p;
-            return updated;
-          }
-          return [...prev, p];
+      }),
+      window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
+        const p = peer as User;
+        setCurrentUser((cur) => {
+          if (cur && cur.id === p.id) return p;
+          setPeers((prev) => {
+            const idx = prev.findIndex((x) => x.id === p.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = p;
+              return updated;
+            }
+            return [...prev, p];
+          });
+          return cur;
         });
-        return cur;
-      });
-    });
-
-    window.zenstate.on(IPC.PEER_LOST, (peerId: unknown) => {
-      setPeers((prev) => prev.filter((p) => p.id !== (peerId as string)));
-    });
-
-    window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
-      setTimerState(data as TimerState);
-    });
-
-    // Listen for emergency access grant/revoke
-    window.zenstate.on(IPC.EMERGENCY_ACCESS, (granted: unknown) => {
-      setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
-    });
-
-    // Listen for status revert countdown
-    window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
-      const tick = data as { remaining: number };
-      setStatusRevertRemaining(tick.remaining);
-    });
-
-    // Listen for update notifications
-    window.zenstate.on('update:downloaded', (data: unknown) => {
-      const info = data as { version: string };
-      setUpdateAvailable(info.version);
-    });
-
-    // Listen for tab switch requests from main process
-    window.zenstate.on('dashboard:switch-tab', (tab: unknown) => {
-      setRequestedTab(tab as string);
-    });
-
-    // Listen for license state changes
-    window.zenstate.on('license:changed', (state: unknown) => {
-      setLicenseState(state as LicenseState);
-    });
-
-    // If the other window just logged in, sync our state so we don't sit on
-    // a stale LoginView while the popover already shows the dashboard.
-    window.zenstate.on('user:logged-in', (user: unknown) => {
-      setCurrentUser(user as User);
-    });
-
-    return () => {
-      window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
-      window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
-      window.zenstate.removeAllListeners(IPC.PEER_LOST);
-      window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
-      window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
-      window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
-      window.zenstate.removeAllListeners('update:downloaded');
-      window.zenstate.removeAllListeners('dashboard:switch-tab');
-      window.zenstate.removeAllListeners('license:changed');
-      window.zenstate.removeAllListeners('user:logged-in');
-    };
+      }),
+      window.zenstate.on(IPC.PEER_LOST, (peerId: unknown) => {
+        setPeers((prev) => prev.filter((p) => p.id !== (peerId as string)));
+      }),
+      window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
+        setTimerState(data as TimerState);
+      }),
+      window.zenstate.on(IPC.EMERGENCY_ACCESS, (granted: unknown) => {
+        setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
+      }),
+      window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
+        const tick = data as { remaining: number };
+        setStatusRevertRemaining(tick.remaining);
+      }),
+      window.zenstate.on('update:downloaded', (data: unknown) => {
+        const info = data as { version: string };
+        setUpdateAvailable(info.version);
+      }),
+      window.zenstate.on('dashboard:switch-tab', (tab: unknown) => {
+        setRequestedTab(tab as string);
+      }),
+      window.zenstate.on('license:changed', (state: unknown) => {
+        setLicenseState(state as LicenseState);
+      }),
+      window.zenstate.on('user:logged-in', (user: unknown) => {
+        setCurrentUser(user as User);
+      }),
+      window.zenstate.on('basecamp:reauth-required', () => {
+        setNeedsBasecampReauth(true);
+      }),
+      // If auth changes back to connected (user re-authed), clear the banner.
+      window.zenstate.on('basecamp:auth-changed', (state: unknown) => {
+        const s = state as { isConnected?: boolean };
+        if (s?.isConnected) setNeedsBasecampReauth(false);
+      }),
+    ];
+    return () => { offs.forEach((off) => off()); };
   }, [currentUser]);
 
   // Auto-refresh records when timer stops
@@ -288,6 +280,59 @@ export default function DashboardApp() {
 
   return (
     <>
+      {/* Basecamp re-auth banner — shows when a 401 → refresh-failed cascade
+          forced a disconnect. Persistent until the user reconnects (or
+          dismisses), since silently dropping syncs would surprise them. */}
+      {needsBasecampReauth && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 201,
+          background: 'var(--status-occupied, #ff9500)',
+          color: 'white',
+          padding: '8px 16px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          fontSize: 12,
+          fontWeight: 500,
+        }}>
+          <span style={{ flex: 1 }}>
+            Basecamp session expired — reconnect in Settings to keep syncing your timesheet.
+          </span>
+          <button
+            onClick={() => { setRequestedTab('settings'); }}
+            style={{
+              background: 'rgba(255,255,255,0.22)',
+              border: '1px solid rgba(255,255,255,0.4)',
+              color: 'white',
+              padding: '4px 12px',
+              borderRadius: 6,
+              fontSize: 11,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Open Settings
+          </button>
+          <button
+            onClick={() => setNeedsBasecampReauth(false)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'rgba(255,255,255,0.7)',
+              cursor: 'pointer',
+              fontSize: 14,
+              padding: 2,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Update notification banner */}
       {updateAvailable && (
         <div style={{

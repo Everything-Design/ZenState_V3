@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Plus, Play, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare } from 'lucide-react';
 import {
-  TodayPlan, PinnedTodo, RecentTodo,
+  IPC, TodayPlan, PinnedTodo, RecentTodo,
   BasecampAuthState, BasecampProject, BasecampTodoList, BasecampTodo, DailyRecord,
 } from '../../../shared/types';
 
@@ -46,17 +46,21 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editingEstimate, setEditingEstimate] = useState<number | null>(null);
 
-  // Initial load + reactive updates from the main process.
+  // Initial load + reactive updates from the main process. Subscribe FIRST,
+  // then fetch — otherwise an event arriving between the request and its
+  // async response can be clobbered by the (stale-by-then) response.
   useEffect(() => {
+    let eventArrived = false;
+    const off = window.zenstate.on(IPC.TODAY_CHANGED, (...args: unknown[]) => {
+      eventArrived = true;
+      setPlan(args[0] as TodayPlan);
+    });
     window.zenstate.todayGet().then((res) => {
-      setPlan(res.plan);
+      if (!eventArrived) setPlan(res.plan);
       setRecents(res.recents);
     }).catch(() => {});
     window.zenstate.bcGetAuthState().then(setAuthState).catch(() => {});
-
-    const onChanged = (...args: unknown[]) => setPlan(args[0] as TodayPlan);
-    window.zenstate.on('today:changed', onChanged);
-    return () => { window.zenstate.removeAllListeners('today:changed'); };
+    return off;
   }, []);
 
   const handlePin = useCallback(async (item: PinnedTodo) => {
@@ -87,9 +91,19 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
   }, []);
 
   const handleToggleComplete = useCallback(async (todoId: number) => {
+    // If the task being marked complete is the one currently being timed,
+    // stop the timer too — otherwise the timer keeps running on a task the
+    // user just declared "done", which is contradictory and noisy in the
+    // session log. Stop kicks the standard confirm-then-post flow.
+    const item = plan.items.find((p) => p.todoId === todoId);
+    const wasIncomplete = item && !item.completedAt;
+    const isThisRunning = item && timerState.isRunning && timerState.taskLabel === item.content;
+    if (wasIncomplete && isThisRunning) {
+      window.zenstate.stopTimer();
+    }
     const next = await window.zenstate.todayToggleComplete(todoId).catch(() => null);
     if (next) setPlan(next);
-  }, []);
+  }, [plan.items, timerState.isRunning, timerState.taskLabel]);
 
   const isRunning = (item: PinnedTodo) => timerState.isRunning && timerState.taskLabel === item.content;
 
@@ -395,13 +409,25 @@ function PinnedRow({
           </button>
         )}
 
-        {/* Start/Stop button */}
+        {/* Start/Stop button — Start is disabled on completed tasks; user
+            must un-check first if they want to keep working on something
+            they marked done. */}
         {running ? (
           <button onClick={onStopTimer} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}>
             <Square size={11} /> Stop
           </button>
         ) : (
-          <button onClick={onStartTimer} className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}>
+          <button
+            onClick={onStartTimer}
+            className="btn btn-primary"
+            disabled={isComplete}
+            title={isComplete ? 'Un-check this task to restart the timer' : undefined}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px',
+              opacity: isComplete ? 0.4 : 1,
+              cursor: isComplete ? 'not-allowed' : 'pointer',
+            }}
+          >
             <Play size={11} /> Start
           </button>
         )}

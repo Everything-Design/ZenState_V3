@@ -230,7 +230,7 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <button className="btn btn-secondary" onClick={() => setHours(Math.max(0, hours - 1))}>−</button>
               <span style={{ fontSize: 14, fontFamily: 'var(--font-mono)', width: 28, textAlign: 'center' }}>{hours}</span>
-              <button className="btn btn-secondary" onClick={() => setHours(Math.min(23, hours + 1))}>+</button>
+              <button className="btn btn-secondary" onClick={() => setHours(Math.min(16, hours + 1))}>+</button>
               <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>h</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

@@ -60,6 +60,7 @@ const IPC = {
   BC_GET_CREDENTIALS: 'basecamp:get-credentials',
   BC_SAVE_CREDENTIALS: 'basecamp:save-credentials',
   BC_CONNECT: 'basecamp:connect',
+  BC_CANCEL_CONNECT: 'basecamp:cancel-connect',
   BC_DISCONNECT: 'basecamp:disconnect',
   BC_GET_AUTH_STATE: 'basecamp:get-auth-state',
   BC_LIST_PROJECTS: 'basecamp:list-projects',
@@ -102,12 +103,14 @@ const LISTEN_CHANNELS: string[] = [
   IPC.STATUS_REVERT_TICK,
   'alert-data',
   'user:logged-in',
+  'popover:shown',
   'update:available',
   'update:downloaded',
   'dashboard:switch-tab',
   'settings:updated',
   'license:changed',
   IPC.BC_AUTH_CHANGED,
+  'basecamp:reauth-required',
   'basecamp:timesheet-updated',
   IPC.TODAY_CHANGED,
   IPC.TOMORROW_CHANGED,
@@ -142,6 +145,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   bcGetCredentials: () => ipcRenderer.invoke(IPC.BC_GET_CREDENTIALS),
   bcSaveCredentials: (creds: { clientId: string; clientSecret: string }) => ipcRenderer.invoke(IPC.BC_SAVE_CREDENTIALS, creds),
   bcConnect: () => ipcRenderer.invoke(IPC.BC_CONNECT),
+  bcCancelConnect: () => ipcRenderer.invoke(IPC.BC_CANCEL_CONNECT),
   bcDisconnect: () => ipcRenderer.invoke(IPC.BC_DISCONNECT),
   bcGetAuthState: () => ipcRenderer.invoke(IPC.BC_GET_AUTH_STATE),
   bcListProjects: () => ipcRenderer.invoke(IPC.BC_LIST_PROJECTS),
@@ -209,15 +213,21 @@ contextBridge.exposeInMainWorld('zenstate', {
   getLoginItemSettings: () => ipcRenderer.invoke('settings:get-login-item'),
   setLoginItemSettings: (enabled: boolean) => ipcRenderer.send('settings:set-login-item', enabled),
 
-  // Listen (main → renderer events). Both `on` and `removeAllListeners` use
-  // the same allowlist so a stray renderer call can't subscribe to or silence
-  // arbitrary channels like 'app:install-update'.
-  on: (channel: string, callback: (...args: unknown[]) => void) => {
-    if (LISTEN_CHANNELS.includes(channel)) {
-      ipcRenderer.on(channel, (_event, ...args) => callback(...args));
-    }
+  // Listen (main → renderer events). `on` returns an unsubscribe function so
+  // each caller can detach its own listener without nuking sibling listeners
+  // on the same channel (the old `removeAllListeners` pattern was a hammer
+  // that clobbered other components' subscriptions). Channel allowlist still
+  // applies to prevent renderer code from subscribing to internal channels.
+  on: (channel: string, callback: (...args: unknown[]) => void): (() => void) => {
+    if (!LISTEN_CHANNELS.includes(channel)) return () => {};
+    const wrapped = (_event: Electron.IpcRendererEvent, ...args: unknown[]) => callback(...args);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
   },
 
+  // Kept for the rare case where a renderer wants to detach all of its OWN
+  // listeners (e.g. before unmounting a top-level surface). Still allowlisted.
+  // Prefer the unsubscribe function returned by `on()` for everyday cleanup.
   removeAllListeners: (channel: string) => {
     if (LISTEN_CHANNELS.includes(channel)) {
       ipcRenderer.removeAllListeners(channel);

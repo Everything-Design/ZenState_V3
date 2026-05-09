@@ -335,6 +335,7 @@ export const IPC = {
   BC_GET_CREDENTIALS: 'basecamp:get-credentials',
   BC_SAVE_CREDENTIALS: 'basecamp:save-credentials',
   BC_CONNECT: 'basecamp:connect',
+  BC_CANCEL_CONNECT: 'basecamp:cancel-connect',
   BC_DISCONNECT: 'basecamp:disconnect',
   BC_GET_AUTH_STATE: 'basecamp:get-auth-state',
   BC_LIST_PROJECTS: 'basecamp:list-projects',

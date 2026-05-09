@@ -295,12 +295,10 @@ function TodosColumn({ authState, project, list, timerState }: TodosColumnProps)
   }, [fetchTodos, fetchTimesheet]);
 
   useEffect(() => {
-    const handler = (...args: unknown[]) => {
+    return window.zenstate.on('basecamp:timesheet-updated', (...args: unknown[]) => {
       const data = args[0] as { projectId?: number };
       if (!data || data.projectId === project.id) fetchTimesheet();
-    };
-    window.zenstate.on('basecamp:timesheet-updated', handler);
-    return () => { window.zenstate.removeAllListeners('basecamp:timesheet-updated'); };
+    });
   }, [project.id, fetchTimesheet]);
 
   const isThisTodoRunning = (todo: BasecampTodo) =>
@@ -565,12 +563,9 @@ export default function ProjectsTab({ timerState, onOpenSettings }: Props) {
       .then((state) => { setAuthState(state); setAuthLoading(false); })
       .catch(() => setAuthLoading(false));
 
-    const handler = (...args: unknown[]) => {
-      const state = args[0] as BasecampAuthState;
-      setAuthState(state);
-    };
-    window.zenstate.on('basecamp:auth-changed', handler);
-    return () => { window.zenstate.removeAllListeners('basecamp:auth-changed'); };
+    return window.zenstate.on('basecamp:auth-changed', (...args: unknown[]) => {
+      setAuthState(args[0] as BasecampAuthState);
+    });
   }, []);
 
   const handleSelectProject = (p: BasecampProject) => {

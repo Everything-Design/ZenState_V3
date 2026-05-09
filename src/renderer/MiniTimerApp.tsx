@@ -37,30 +37,34 @@ export default function MiniTimerApp() {
 
   // ── Subscribe to timer state ─────────────────────────────────
   useEffect(() => {
-    window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
+    const off = window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
       const t = data as TimerState;
       setTimer(t);
     });
-    return () => { window.zenstate.removeAllListeners(IPC.TIMER_UPDATE); };
+    return off;
   }, []);
 
-  // ── Load plan + settings; subscribe to changes ─────
+  // ── Load plan + settings; subscribe to changes. Subscribe before fetching
+  // so a today:changed event arriving during the fetch can't be clobbered
+  // by the late initial response.
   useEffect(() => {
-    (window as any).zenstate.todayGet?.().then((res: { plan: TodayPlan }) => {
-      if (res) setPlan(res.plan);
+    let planEventArrived = false;
+    const offToday = window.zenstate.on(IPC.TODAY_CHANGED, (...args: unknown[]) => {
+      planEventArrived = true;
+      setPlan(args[0] as TodayPlan);
+    });
+    const offSettings = window.zenstate.on('settings:updated', (...args: unknown[]) => {
+      setAutoDim(!!(args[0] as AppSettings)?.miniTimerAutoDim);
+    });
+
+    window.zenstate.todayGet().then((res) => {
+      if (!planEventArrived && res) setPlan(res.plan);
     }).catch(() => {});
-    (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
+    window.zenstate.getSettings().then((s) => {
       setAutoDim(!!s?.miniTimerAutoDim);
     }).catch(() => {});
 
-    const onTodayChanged = (...args: unknown[]) => setPlan(args[0] as TodayPlan);
-    const onSettingsChanged = (...args: unknown[]) => setAutoDim(!!(args[0] as AppSettings)?.miniTimerAutoDim);
-    window.zenstate.on('today:changed', onTodayChanged);
-    window.zenstate.on('settings:updated', onSettingsChanged);
-    return () => {
-      window.zenstate.removeAllListeners('today:changed');
-      window.zenstate.removeAllListeners('settings:updated');
-    };
+    return () => { offToday(); offSettings(); };
   }, []);
 
   // ── Auto-dim: fade pill to 50% after 4s of no hover, snap back on enter ──
@@ -432,28 +436,22 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Row in the expanded pill: title + Switch button on the right. The whole
+// row is NOT clickable on purpose — when the user is typing a long mid-session
+// note in the textarea, an accidental click on a row title would otherwise
+// flush+switch tasks unintentionally. Confining the action to a small button
+// keeps the switch deliberate.
 function SwitchRow({ title, subtitle, onClick }: { title: string; subtitle?: string; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        width: '100%',
-        textAlign: 'left',
-        padding: '8px 12px',
-        background: 'transparent',
-        border: 'none',
-        color: '#e6edf3',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        transition: 'background 120ms ease',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      <Play size={10} style={{ color: 'var(--status-available, #34c759)', flexShrink: 0, opacity: 0.85 }} />
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      width: '100%',
+      padding: '8px 12px',
+      color: '#e6edf3',
+      fontFamily: 'inherit',
+    }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
         {subtitle && (
@@ -462,6 +460,25 @@ function SwitchRow({ title, subtitle, onClick }: { title: string; subtitle?: str
           </div>
         )}
       </div>
-    </button>
+      <button
+        onClick={onClick}
+        title={`Switch timer to "${title}"`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 3,
+          padding: '4px 9px',
+          background: 'rgba(48, 209, 88, 0.18)',
+          border: '1px solid rgba(48, 209, 88, 0.32)',
+          borderRadius: 6,
+          color: 'var(--status-available, #34c759)',
+          fontSize: 10, fontWeight: 600, fontFamily: 'inherit',
+          cursor: 'pointer', flexShrink: 0,
+          transition: 'background 120ms ease',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(48, 209, 88, 0.28)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(48, 209, 88, 0.18)'; }}
+      >
+        <Play size={9} /> Switch
+      </button>
+    </div>
   );
 }

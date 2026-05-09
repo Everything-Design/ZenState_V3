@@ -27,7 +27,7 @@ export default function App() {
   });
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
   const [statusRevertRemaining, setStatusRevertRemaining] = useState(0);
-  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, payload: null });
+  const [licenseState, setLicenseState] = useState<LicenseState>({ isValid: false, isPro: false, isAdmin: false, payload: null });
 
   // Load initial data
   useEffect(() => {
@@ -45,89 +45,70 @@ export default function App() {
     init();
   }, []);
 
-  // Listen for networking events
+  // Listen for networking events. Each on() returns its own unsubscribe so
+  // unmount cleanup detaches only this component's listeners (the old
+  // removeAllListeners pattern would nuke sibling subscribers on the same
+  // channel, e.g. when SettingsTab and ProjectsTab both listened on
+  // basecamp:auth-changed in the dashboard window).
   useEffect(() => {
-    window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
-      const p = peer as User;
-      setCurrentUser((cur) => {
-        if (cur && cur.id === p.id) return cur; // It's us, skip
-        setPeers((prev) => {
-          const existing = prev.findIndex((x) => x.id === p.id);
-          if (existing >= 0) {
-            const updated = [...prev];
-            updated[existing] = p;
-            return updated;
-          }
-          return [...prev, p];
+    const offs = [
+      window.zenstate.on(IPC.PEER_DISCOVERED, (peer: unknown) => {
+        const p = peer as User;
+        setCurrentUser((cur) => {
+          if (cur && cur.id === p.id) return cur;
+          setPeers((prev) => {
+            const existing = prev.findIndex((x) => x.id === p.id);
+            if (existing >= 0) {
+              const updated = [...prev];
+              updated[existing] = p;
+              return updated;
+            }
+            return [...prev, p];
+          });
+          return cur;
         });
-        return cur;
-      });
-    });
-
-    window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
-      const p = peer as User;
-      setCurrentUser((cur) => {
-        if (cur && cur.id === p.id) return p; // Update self
-        setPeers((prev) => {
-          const idx = prev.findIndex((x) => x.id === p.id);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = p;
-            return updated;
-          }
-          return [...prev, p];
+      }),
+      window.zenstate.on(IPC.PEER_UPDATED, (peer: unknown) => {
+        const p = peer as User;
+        setCurrentUser((cur) => {
+          if (cur && cur.id === p.id) return p;
+          setPeers((prev) => {
+            const idx = prev.findIndex((x) => x.id === p.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = p;
+              return updated;
+            }
+            return [...prev, p];
+          });
+          return cur;
         });
-        return cur;
-      });
-    });
-
-    window.zenstate.on(IPC.PEER_LOST, (peerId: unknown) => {
-      setPeers((prev) => prev.filter((p) => p.id !== (peerId as string)));
-    });
-
-    window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
-      setTimerState(data as typeof timerState);
-    });
-
-    // Listen for emergency access grant/revoke
-    window.zenstate.on(IPC.EMERGENCY_ACCESS, (granted: unknown) => {
-      setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
-    });
-
-    // Listen for status revert countdown
-    window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
-      const tick = data as { remaining: number };
-      setStatusRevertRemaining(tick.remaining);
-    });
-
-    // Listen for update notifications
-    window.zenstate.on('update:downloaded', (data: unknown) => {
-      const info = data as { version: string };
-      setUpdateAvailable(info.version);
-    });
-
-    // Listen for license state changes
-    window.zenstate.on('license:changed', (state: unknown) => {
-      setLicenseState(state as LicenseState);
-    });
-
-    // Refresh local state if the other window just logged in/out so we don't
-    // sit on a stale LoginView (or stale dashboard) after the user transitions.
-    window.zenstate.on('user:logged-in', (user: unknown) => {
-      setCurrentUser(user as User);
-    });
-
-    return () => {
-      window.zenstate.removeAllListeners(IPC.PEER_DISCOVERED);
-      window.zenstate.removeAllListeners(IPC.PEER_UPDATED);
-      window.zenstate.removeAllListeners(IPC.PEER_LOST);
-      window.zenstate.removeAllListeners(IPC.TIMER_UPDATE);
-      window.zenstate.removeAllListeners(IPC.EMERGENCY_ACCESS);
-      window.zenstate.removeAllListeners(IPC.STATUS_REVERT_TICK);
-      window.zenstate.removeAllListeners('update:downloaded');
-      window.zenstate.removeAllListeners('license:changed');
-      window.zenstate.removeAllListeners('user:logged-in');
-    };
+      }),
+      window.zenstate.on(IPC.PEER_LOST, (peerId: unknown) => {
+        setPeers((prev) => prev.filter((p) => p.id !== (peerId as string)));
+      }),
+      window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
+        setTimerState(data as typeof timerState);
+      }),
+      window.zenstate.on(IPC.EMERGENCY_ACCESS, (granted: unknown) => {
+        setCurrentUser((prev) => prev ? { ...prev, canSendEmergency: granted as boolean } : prev);
+      }),
+      window.zenstate.on(IPC.STATUS_REVERT_TICK, (data: unknown) => {
+        const tick = data as { remaining: number };
+        setStatusRevertRemaining(tick.remaining);
+      }),
+      window.zenstate.on('update:downloaded', (data: unknown) => {
+        const info = data as { version: string };
+        setUpdateAvailable(info.version);
+      }),
+      window.zenstate.on('license:changed', (state: unknown) => {
+        setLicenseState(state as LicenseState);
+      }),
+      window.zenstate.on('user:logged-in', (user: unknown) => {
+        setCurrentUser(user as User);
+      }),
+    ];
+    return () => { offs.forEach((off) => off()); };
   }, []);
 
   const handleLogin = useCallback(async (user: User) => {

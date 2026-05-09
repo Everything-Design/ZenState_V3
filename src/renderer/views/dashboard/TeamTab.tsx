@@ -44,12 +44,15 @@ export default function TeamTab({ currentUser, peers }: Props) {
   const [recentPings, setRecentPings] = useState<ReceivedPing[]>([]);
 
   useEffect(() => {
-    window.zenstate.teamGetRecentPings().then(setRecentPings).catch(() => {});
-    const onPing = (...args: unknown[]) => {
-      setRecentPings((prev) => [args[0] as ReceivedPing, ...prev].slice(0, 20));
-    };
-    window.zenstate.on(IPC.TEAM_PING_RECEIVED, onPing);
-    return () => { window.zenstate.removeAllListeners(IPC.TEAM_PING_RECEIVED); };
+    let pingArrived = false;
+    const off = window.zenstate.on(IPC.TEAM_PING_RECEIVED, (...args: unknown[]) => {
+      pingArrived = true;
+      setRecentPings((prev) => [args[0] as ReceivedPing, ...prev].slice(0, 50));
+    });
+    window.zenstate.teamGetRecentPings().then((initial) => {
+      if (!pingArrived) setRecentPings(initial);
+    }).catch(() => {});
+    return off;
   }, []);
 
   async function dismissPing(id: string) {
@@ -67,7 +70,7 @@ export default function TeamTab({ currentUser, peers }: Props) {
 
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
-    const handler = (data: unknown) => {
+    return window.zenstate.on(IPC.MEETING_RESPONSE, (data: unknown) => {
       const response = data as { accepted: boolean; from: string };
       const peer = peers.find((p) => p.name === response.from);
       if (peer) {
@@ -76,11 +79,7 @@ export default function TeamTab({ currentUser, peers }: Props) {
           return rest;
         });
       }
-    };
-    window.zenstate.on(IPC.MEETING_RESPONSE, handler);
-    return () => {
-      window.zenstate.removeAllListeners(IPC.MEETING_RESPONSE);
-    };
+    });
   }, [peers]);
 
   // Online peers only (hide offline)
@@ -178,14 +177,19 @@ export default function TeamTab({ currentUser, peers }: Props) {
         </button>
       </div>
 
-      {/* Recent pings */}
+      {/* Recent pings — show all (scrollable in the card), with the sender's
+          avatar colour as a tint on the left edge so it's easy to skim by who. */}
       {recentPings.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--zen-text)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Megaphone size={13} style={{ color: 'var(--zen-primary)' }} /> Recent pings
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {recentPings.slice(0, 5).map((p) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+            {recentPings.map((p) => {
+              const sender = peers.find((peer) => peer.id === p.senderId);
+              const avatarColor = sender?.avatarColor || '#8E8E93';
+              const initial = (sender?.name || p.senderName).charAt(0).toUpperCase();
+              return (
               <div key={p.id} style={{
                 display: 'flex', alignItems: 'flex-start', gap: 10,
                 padding: '10px 12px',
@@ -193,6 +197,23 @@ export default function TeamTab({ currentUser, peers }: Props) {
                 background: 'var(--zen-tertiary-bg)',
                 border: '1px solid var(--zen-divider)',
               }}>
+                {/* Sender avatar — uses peer color if known, falls back to grey */}
+                <div style={{
+                  width: 26, height: 26, borderRadius: '50%',
+                  background: avatarColor,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                  fontSize: 12, fontWeight: 600, color: 'white',
+                  overflow: 'hidden',
+                }}>
+                  {sender?.avatarImageData ? (
+                    <img src={`data:image/png;base64,${sender.avatarImageData}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : sender?.avatarEmoji ? (
+                    <span style={{ fontSize: 14 }}>{sender.avatarEmoji}</span>
+                  ) : (
+                    initial
+                  )}
+                </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, color: 'var(--zen-text)', lineHeight: 1.4 }}>{p.message}</div>
                   <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginTop: 3, display: 'flex', gap: 6 }}>
@@ -211,7 +232,8 @@ export default function TeamTab({ currentUser, peers }: Props) {
                   <X size={13} />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Plus, Briefcase, Clock, X, Sunrise } from 'lucide-react';
 import {
-  TodayPlan, PinnedTodo, RecentTodo,
+  IPC, TodayPlan, PinnedTodo, RecentTodo,
   BasecampAuthState,
 } from '../../../shared/types';
 import { PinPicker } from './TodayTab';
@@ -30,13 +30,33 @@ export default function TomorrowTab({ onOpenSettings }: Props) {
   const [editingEstimate, setEditingEstimate] = useState<number | null>(null);
 
   useEffect(() => {
-    window.zenstate.tomorrowGet().then(setPlan).catch(() => {});
+    let eventArrived = false;
+    const offChanged = window.zenstate.on(IPC.TOMORROW_CHANGED, (...args: unknown[]) => {
+      eventArrived = true;
+      setPlan(args[0] as TodayPlan);
+    });
+    // Re-fetch when the window/tab becomes visible. Covers two real cases:
+    // (1) midnight rollover happened while the dashboard was unfocused — the
+    //     plan we're showing is now yesterday's "tomorrow" (which was
+    //     promoted into today). After re-fetch we'll show an empty Tomorrow.
+    // (2) any tomorrow:changed broadcast missed during a state we couldn't
+    //     subscribe to (e.g. cross-window race on first mount).
+    const onFocus = () => {
+      window.zenstate.tomorrowGet().then(setPlan).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+
+    window.zenstate.tomorrowGet().then((res) => {
+      if (!eventArrived) setPlan(res);
+    }).catch(() => {});
     window.zenstate.recentsGet().then(setRecents).catch(() => {});
     window.zenstate.bcGetAuthState().then(setAuthState).catch(() => {});
-
-    const onChanged = (...args: unknown[]) => setPlan(args[0] as TodayPlan);
-    window.zenstate.on('tomorrow:changed', onChanged);
-    return () => { window.zenstate.removeAllListeners('tomorrow:changed'); };
+    return () => {
+      offChanged();
+      document.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
 
   const handlePin = useCallback(async (item: PinnedTodo) => {

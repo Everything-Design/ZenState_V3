@@ -3,7 +3,7 @@ import { BasecampOAuth } from './oauth';
 import { BasecampApi } from './api';
 import { BasecampAuthState, BasecampCredentials } from '../../../shared/types';
 
-export type BasecampServiceEvent = 'authChanged';
+export type BasecampServiceEvent = 'authChanged' | 'reauthRequired';
 
 export class BasecampService extends EventEmitter {
   readonly oauth = new BasecampOAuth();
@@ -11,8 +11,10 @@ export class BasecampService extends EventEmitter {
 
   constructor() {
     super();
-    // Re-emit auth changes so the IPC layer can broadcast to renderers.
+    // Re-emit auth changes + forced-disconnect events so the IPC layer can
+    // broadcast both to renderers (state update + persistent banner).
     this.oauth.on('authChanged', () => this.emit('authChanged', this.getAuthState()));
+    this.oauth.on('reauthRequired', () => this.emit('reauthRequired'));
   }
 
   getAuthState(): BasecampAuthState {

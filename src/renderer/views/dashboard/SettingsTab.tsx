@@ -97,33 +97,33 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     (window as any).zenstate.getSettings?.().then((s: AppSettings) => {
       if (s) setAppSettings(s);
     }).catch(() => {});
-    // Listen for auto-update download completion
-    (window as any).zenstate.on('update:downloaded', () => {
+    // Listen for auto-update download completion + basecamp auth changes.
+    // Each on() returns its own unsubscribe so when SettingsTab unmounts we
+    // detach only these listeners — not, e.g., ProjectsTab's subscription on
+    // the same basecamp:auth-changed channel in the same dashboard window.
+    const offUpdate = window.zenstate.on('update:downloaded', () => {
       setUpdateStatus('downloaded');
     });
 
     // Basecamp: seed state and listen for auth changes from main process
-    (window as any).zenstate.bcGetAuthState?.().then((state: BasecampAuthState) => {
-      setBcAuthState(state);
-    }).catch(() => {});
-    (window as any).zenstate.bcGetCredentials?.().then((creds: BasecampCredentials | null) => {
+    window.zenstate.bcGetAuthState().then((state) => setBcAuthState(state)).catch(() => {});
+    window.zenstate.bcGetCredentials().then((creds) => {
       if (creds) {
         setBcCredentials(creds);
         setBcCredentialsSaved(true);
       }
     }).catch(() => {});
-    const bcAuthHandler = (...args: unknown[]) => {
+    const offAuth = window.zenstate.on('basecamp:auth-changed', (...args: unknown[]) => {
       const state = args[0] as BasecampAuthState;
       setBcAuthState(state);
       setBcConnecting(false);
       if (bcConnectTimer.current) { clearInterval(bcConnectTimer.current); bcConnectTimer.current = null; }
       setBcConnectElapsed(0);
-    };
-    (window as any).zenstate.on('basecamp:auth-changed', bcAuthHandler);
+    });
 
     return () => {
-      (window as any).zenstate.removeAllListeners?.('update:downloaded');
-      (window as any).zenstate.removeAllListeners?.('basecamp:auth-changed');
+      offUpdate();
+      offAuth();
       if (bcConnectTimer.current) clearInterval(bcConnectTimer.current);
     };
   }, []);
@@ -831,8 +831,11 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
 
           {/* Reset App */}
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 8 }}>
-              Reset will clear all your data including sessions, settings, and account info.
+            <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 8, lineHeight: 1.5 }}>
+              Reset clears your account, time-tracking history, today/tomorrow plans,
+              recently-used to-dos, peer groups, Basecamp connection, and license.
+              App preferences (mini-timer, break reminders, etc.) are kept — you can
+              tweak them in Settings after signing back in.
             </div>
             {showResetConfirm ? (
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
@@ -973,15 +976,19 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
                       : 'Connecting…'
                     : 'Connect'}
                 </button>
-                {bcConnecting && bcConnectElapsed >= 30 && (
+                {bcConnecting && bcConnectElapsed >= 5 && (
                   <button
                     className="btn btn-secondary"
                     style={{ color: 'var(--status-focused)' }}
                     onClick={() => {
+                      // Tell main to abort the in-flight OAuth flow so the
+                      // callback server's port is freed up immediately and
+                      // the connect Promise rejects on the renderer side.
+                      window.zenstate.bcCancelConnect().catch(() => {});
                       setBcConnecting(false);
                       if (bcConnectTimer.current) { clearInterval(bcConnectTimer.current); bcConnectTimer.current = null; }
                       setBcConnectElapsed(0);
-                      (window as any).zenstate.bcGetAuthState?.().then(setBcAuthState).catch(() => {});
+                      window.zenstate.bcGetAuthState().then(setBcAuthState).catch(() => {});
                     }}
                   >
                     Cancel

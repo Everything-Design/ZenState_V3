@@ -16,13 +16,9 @@ export default function AlertApp() {
   const [alertData, setAlertData] = useState<AlertData | null>(null);
 
   useEffect(() => {
-    window.zenstate.on('alert-data', (data: unknown) => {
+    return window.zenstate.on('alert-data', (data: unknown) => {
       setAlertData(data as AlertData);
     });
-
-    return () => {
-      window.zenstate.removeAllListeners('alert-data');
-    };
   }, []);
 
   if (!alertData) {

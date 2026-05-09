@@ -65,7 +65,7 @@ function decrypt(field: EncField): string {
   return Buffer.from(field.v, 'base64').toString('utf8');
 }
 
-export type BasecampOAuthEvents = 'authChanged';
+export type BasecampOAuthEvents = 'authChanged' | 'reauthRequired';
 
 export class BasecampOAuth extends EventEmitter {
   private pendingCallback: ((result: { code?: string; state?: string; error?: string }) => void) | null = null;
@@ -251,10 +251,21 @@ export class BasecampOAuth extends EventEmitter {
         shell.openExternal(`${BC_AUTH_URL}?${params.toString()}`);
       });
 
+      // 90 seconds is plenty for someone to authorize in the browser. The
+      // old 5-minute timeout left users staring at a frozen "Connecting…"
+      // spinner for ages if they closed the OAuth tab without completing.
       this.timeoutHandle = setTimeout(() => {
-        this.pendingCallback?.({ error: 'Authorization timed out' });
-      }, 5 * 60 * 1000);
+        this.pendingCallback?.({ error: 'Authorization timed out — please try again' });
+      }, 90 * 1000);
     });
+  }
+
+  // Renderer-callable cancel for the OAuth flow. Used by Settings → Cancel
+  // on the connect spinner so the user doesn't have to wait 90 s for the
+  // timeout when they realised they don't have the credentials handy.
+  cancelConnect(): void {
+    if (!this.pendingCallback) return;
+    this.pendingCallback({ error: 'Authorization cancelled' });
   }
 
   private stopServer(): void {
@@ -318,7 +329,12 @@ export class BasecampOAuth extends EventEmitter {
       });
       if (!res.ok) {
         const body = await res.text();
+        // Forced disconnect — fire a distinct event so the renderer can
+        // surface a persistent "session expired, reconnect" banner instead
+        // of silently entering the disconnected state. authChanged still
+        // fires too, for state-update consumers.
         this.disconnect();
+        this.emit('reauthRequired');
         throw new Error(`Token refresh failed (${res.status}): ${body}`);
       }
       const data = await res.json() as { access_token: string; refresh_token?: string; expires_in: number };

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Settings, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
+import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
 import { User, AvailabilityStatus, IPC, LicenseState, TodayPlan, PinnedTodo, ReceivedPing } from '../../shared/types';
 import SendPingSheet from '../components/SendPingSheet';
 
@@ -112,11 +112,27 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
 
   // Load Today's plan and stay subscribed to changes so the popover shows
   // pinned to-dos as soon as the user pins/unpins from the Dashboard.
+  // IMPORTANT ORDER: subscribe FIRST, then invoke todayGet. Otherwise an
+  // event arriving between the request and its async response can be
+  // overwritten by the (now-stale) response. A pin done very quickly after
+  // mount would otherwise vanish from the popover until the next reopen.
   useEffect(() => {
-    (window as any).zenstate.todayGet?.().then((res: { plan: TodayPlan }) => setTodayPlan(res?.plan ?? null)).catch(() => {});
-    const onChanged = (...args: unknown[]) => setTodayPlan(args[0] as TodayPlan);
-    window.zenstate.on('today:changed', onChanged);
-    return () => { window.zenstate.removeAllListeners('today:changed'); };
+    let eventArrived = false;
+    const offChanged = window.zenstate.on(IPC.TODAY_CHANGED, (...args: unknown[]) => {
+      eventArrived = true;
+      setTodayPlan(args[0] as TodayPlan);
+    });
+    // Re-fetch on each tray-show — covers midnight rollover and any IPC that
+    // was broadcast while the popover renderer hadn't fully mounted.
+    const offShown = window.zenstate.on('popover:shown', () => {
+      window.zenstate.todayGet().then((res) => {
+        setTodayPlan(res?.plan ?? null);
+      }).catch(() => {});
+    });
+    window.zenstate.todayGet().then((res) => {
+      if (!eventArrived) setTodayPlan(res?.plan ?? null);
+    }).catch(() => {});
+    return () => { offChanged(); offShown(); };
   }, []);
 
   // First-load default: if Today is empty but peers are around, open on Team.
@@ -131,14 +147,17 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
   }, [todayPlan, peers.length, tabAutoChosen]);
 
   // Recent received pings — load on mount and stay subscribed for new ones.
+  // Same subscribe-first-then-fetch pattern to avoid clobbering an in-flight
+  // ping with the stale initial fetch.
   useEffect(() => {
-    window.zenstate.teamGetRecentPings().then(setRecentPings).catch(() => {});
-    const onPing = (...args: unknown[]) => {
+    const off = window.zenstate.on(IPC.TEAM_PING_RECEIVED, (...args: unknown[]) => {
       const ping = args[0] as ReceivedPing;
-      setRecentPings((prev) => [ping, ...prev].slice(0, 20));
-    };
-    window.zenstate.on(IPC.TEAM_PING_RECEIVED, onPing);
-    return () => { window.zenstate.removeAllListeners(IPC.TEAM_PING_RECEIVED); };
+      setRecentPings((prev) => [ping, ...prev].slice(0, 50));
+    });
+    window.zenstate.teamGetRecentPings().then((initial) => {
+      setRecentPings((prev) => prev.length > 0 ? prev : initial);
+    }).catch(() => {});
+    return off;
   }, []);
 
   async function dismissPing(id: string) {
@@ -158,9 +177,8 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
 
   // Clear pending request when peer responds (accept or decline)
   useEffect(() => {
-    const handler = (data: unknown) => {
+    return window.zenstate.on(IPC.MEETING_RESPONSE, (data: unknown) => {
       const response = data as { accepted: boolean; from: string };
-      // Find peer by name and clear their pending state
       const peer = peers.find((p) => p.name === response.from);
       if (peer) {
         setPendingRequests((prev) => {
@@ -168,11 +186,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           return rest;
         });
       }
-    };
-    window.zenstate.on(IPC.MEETING_RESPONSE, handler);
-    return () => {
-      window.zenstate.removeAllListeners(IPC.MEETING_RESPONSE);
-    };
+    });
   }, [peers]);
 
   // Online peers only (hide offline)
@@ -501,7 +515,13 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
               transition: 'background var(--duration-quick) var(--ease-standard), color var(--duration-quick) var(--ease-standard)',
             }}
           >
-            Today{todayPlan && todayPlan.items.length > 0 ? ` · ${todayPlan.items.length}` : ''}
+            Today{todayPlan && todayPlan.items.length > 0
+              ? (() => {
+                  const total = todayPlan.items.length;
+                  const done = todayPlan.items.filter((i) => i.completedAt).length;
+                  return done > 0 ? ` · ${total - done}/${total}` : ` · ${total}`;
+                })()
+              : ''}
           </button>
           <button
             onClick={() => setPopoverTab('team')}
@@ -527,21 +547,26 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
       {/* TODAY tab content */}
       {popoverTab === 'today' && (
       <>
-      {todayPlan && todayPlan.items.length > 0 ? (
+      {todayPlan === null ? (
+        // Loading skeleton — avoid flashing the empty state for one render
+        // while todayGet() is in flight on first open.
+        <div style={{ padding: '24px 16px', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>Loading…</div>
+        </div>
+      ) : todayPlan.items.length > 0 ? (
         <div style={{ padding: '6px 16px 0', flex: 1, overflowY: 'auto' }}>
-          {todayPlan.items.length > 3 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
-              <button
-                onClick={() => { window.zenstate.openDashboard('today'); window.zenstate.closePopover(); }}
-                style={{ background: 'transparent', border: 'none', color: 'var(--zen-tertiary-text)', fontSize: 'var(--text-xs)', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
-              >
-                +{todayPlan.items.length - 3} more in Dashboard →
-              </button>
-            </div>
-          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {todayPlan.items.slice(0, 3).map((p) => {
+            {/* Show ALL items — the parent div scrolls if there are many.
+                Sort completed items to the bottom so active todos stay above
+                the fold; users hate scrolling past struck-through rows to
+                find what's still actionable. */}
+            {[...todayPlan.items].sort((a, b) => Number(!!a.completedAt) - Number(!!b.completedAt)).map((p) => {
               const running = isTimerActive && timerState.taskLabel === p.content;
+              const isComplete = !!p.completedAt;
+              // Don't allow starting a timer on a completed task — the user
+              // marked it done, so the Start button is disabled until they
+              // un-check it on the dashboard.
+              const startDisabled = isTimerActive || isComplete;
               return (
                 <div
                   key={p.todoId}
@@ -551,18 +576,23 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                     borderRadius: 'var(--radius-sm)',
                     background: running ? 'rgba(48, 209, 88, 0.08)' : 'var(--zen-tertiary-bg)',
                     border: `1px solid ${running ? 'rgba(48, 209, 88, 0.25)' : 'var(--zen-divider)'}`,
-                    transition: 'background var(--duration-quick) var(--ease-standard)',
+                    opacity: isComplete ? 0.55 : 1,
+                    transition: 'background var(--duration-quick) var(--ease-standard), opacity var(--duration-quick) var(--ease-standard)',
                   }}
                 >
                   <div style={{
                     width: 8, height: 8, borderRadius: '50%',
-                    background: running ? 'var(--status-available)' : 'transparent',
-                    border: running ? 'none' : '1.5px solid var(--zen-tertiary-text)',
+                    background: isComplete ? 'var(--status-available)' : (running ? 'var(--status-available)' : 'transparent'),
+                    border: isComplete || running ? 'none' : '1.5px solid var(--zen-tertiary-text)',
                     flexShrink: 0,
                     boxShadow: running ? '0 0 6px rgba(48, 209, 88, 0.5)' : 'none',
                   }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{
+                      fontSize: 'var(--text-sm)', color: 'var(--zen-text)',
+                      textDecoration: isComplete ? 'line-through' : 'none',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
                       {p.content}
                     </div>
                     {p.projectName && (
@@ -577,9 +607,10 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
                       Stop
                     </button>
                   ) : (
-                    <button onClick={() => handleStartFromPinned(p)} title="Start timer"
-                      disabled={isTimerActive}
-                      style={{ background: 'var(--zen-primary)', border: 'none', color: 'white', cursor: isTimerActive ? 'not-allowed' : 'pointer', opacity: isTimerActive ? 0.4 : 1, padding: '4px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <button onClick={() => handleStartFromPinned(p)}
+                      title={isComplete ? 'Marked complete — un-check on the Plan tab to restart' : 'Start timer'}
+                      disabled={startDisabled}
+                      style={{ background: 'var(--zen-primary)', border: 'none', color: 'white', cursor: startDisabled ? 'not-allowed' : 'pointer', opacity: startDisabled ? 0.4 : 1, padding: '4px 9px', borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                       <Play size={9} /> Start
                     </button>
                   )}

@@ -193,6 +193,19 @@ app.on('second-instance', () => {
 function togglePopover() {
   if (!popoverWindow) return;
 
+  // Onboarding gate — until the user has finished the dashboard signup form,
+  // suppress the popover entirely and route the tray click to the dashboard
+  // window instead. Otherwise the user sees a duplicate LoginView in the
+  // popover, types into one, and the other one stays stuck on a stale form.
+  if (!persistence.getUser()) {
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      if (dashboardWindow.isMinimized()) dashboardWindow.restore();
+      dashboardWindow.show();
+      dashboardWindow.focus();
+    }
+    return;
+  }
+
   if (popoverWindow.isVisible()) {
     popoverWindow.hide();
   } else {
@@ -201,6 +214,12 @@ function togglePopover() {
     positionPopover(popoverWindow);
     popoverWindow.show();
     popoverWindow.focus();
+    // Nudge the popover renderer to re-fetch its data. Covers two edge cases:
+    // (1) midnight rollover happened while the app was idle, so the cached
+    //     todayPlan in the renderer is stale.
+    // (2) any change broadcast that arrived while the popover was hidden but
+    //     before its listener was attached on first open.
+    popoverWindow.webContents.send('popover:shown');
   }
 }
 
@@ -680,12 +699,18 @@ function lastActivityIsoTime(): string {
   return new Date(Date.now() - idleSec * 1000).toISOString();
 }
 
+// Tracks whether the open long-run alert already received a Continue/Stop/
+// Backdate response, so the window's `closed` event (which fires AFTER the
+// IPC response calls window.close()) doesn't re-treat it as a dismiss.
+let longRunResponded = false;
+
 function showLongRunAlert(elapsedSeconds: number) {
   const alertWin = createAlertWindow(getRendererURL('alert.html'), {
     width: 380,
     height: 320,
   });
   longRunAlertWin = alertWin;
+  longRunResponded = false;
   alertWin.webContents.once('did-finish-load', () => {
     alertWin.webContents.send('alert-data', {
       type: 'longRunGuard',
@@ -698,8 +723,12 @@ function showLongRunAlert(elapsedSeconds: number) {
   // If the user dismisses the alert with the OS X without picking an option,
   // treat it as "continue working" (least-destructive default) and reset the
   // guard so the prompt can re-fire after another threshold's worth of time.
+  // Skip the reset when an explicit response was already handled — otherwise
+  // a "Stop" / "Walked away" response would fall through here and re-arm the
+  // guard against a now-stopped timer.
   alertWin.on('closed', () => {
     if (longRunAlertWin === alertWin) longRunAlertWin = null;
+    if (longRunResponded) return;
     if (timerIsRunning) longRunGuardFired = false;
   });
 }
@@ -1007,6 +1036,9 @@ function setupIPC() {
   // Long-run guard alert response — user confirms they're still working,
   // explicitly stops now, or back-dates the stop to their last keyboard activity.
   ipcMain.on(IPC.TIMER_LONG_RUN_RESPONSE, (_e, payload: { action: 'continue' | 'stop' | 'backdate'; stopAtIso?: string }) => {
+    // Mark that we got an explicit response so the alert window's close
+    // handler doesn't re-treat the close as a dismiss + re-arm the guard.
+    longRunResponded = true;
     if (!timerIsRunning) return;
     if (payload.action === 'continue') return; // keep running, alert dismisses itself
     if (payload.action === 'stop') {
@@ -1401,6 +1433,21 @@ function setupIPC() {
   basecamp.on('authChanged', (state) => {
     broadcastToWindows(IPC.BC_AUTH_CHANGED, state);
   });
+  basecamp.on('reauthRequired', () => {
+    // Forced disconnect from a 401 → refresh-failed cascade. Tell the
+    // renderer to surface a persistent banner, and fire a native
+    // notification so users notice even with the dashboard closed.
+    broadcastToWindows('basecamp:reauth-required', {});
+    try {
+      new Notification({
+        title: 'Basecamp session expired',
+        body: 'Reconnect in Settings to keep syncing your timesheet.',
+        silent: false,
+      }).show();
+    } catch (err) {
+      console.warn('Failed to show reauth notification:', err);
+    }
+  });
 
   // Node's fetch hides the real reason inside `err.cause` and only surfaces
   // "fetch failed" via err.message. Walk the cause chain so the renderer
@@ -1429,6 +1476,10 @@ function setupIPC() {
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }
+  });
+  ipcMain.handle(IPC.BC_CANCEL_CONNECT, () => {
+    basecamp.oauth.cancelConnect();
+    return true;
   });
   ipcMain.handle(IPC.BC_DISCONNECT, () => {
     basecamp.disconnect();
@@ -1760,37 +1811,23 @@ function isoDateLocal(d: Date): string {
 
 // ── Keyboard Shortcuts ─────────────────────────────────────────
 
+// Apply a status change initiated by a global shortcut. Mirrors the path
+// taken when the user clicks a status pill in the popover/dashboard:
+// cancel any in-flight auto-revert (so the shortcut wins) and broadcast
+// the new state to networking + UI.
+function applyStatusChangeFromShortcut(status: AvailabilityStatus) {
+  const user = persistence.getUser();
+  if (!user) return;
+  cancelStatusRevertTimer();
+  user.status = status;
+  persistence.saveUser(user);
+  networking?.updateUser(user);
+  updateTrayIcon(user, 0, timerIsRunning);
+  broadcastToWindows(IPC.PEER_UPDATED, user);
+}
+
 function registerShortcuts() {
-  globalShortcut.register('CmdOrCtrl+Shift+A', () => {
-    const user = persistence.getUser();
-    if (user) {
-      user.status = AvailabilityStatus.Available;
-      persistence.saveUser(user);
-      networking?.updateUser(user);
-      updateTrayIcon(user, 0, timerIsRunning);
-      broadcastToWindows(IPC.PEER_UPDATED, user);
-    }
-  });
-
-  globalShortcut.register('CmdOrCtrl+Shift+P', () => {
-    const user = persistence.getUser();
-    if (user) {
-      user.status = AvailabilityStatus.Occupied;
-      persistence.saveUser(user);
-      networking?.updateUser(user);
-      updateTrayIcon(user, 0, timerIsRunning);
-      broadcastToWindows(IPC.PEER_UPDATED, user);
-    }
-  });
-
-  globalShortcut.register('CmdOrCtrl+Shift+F', () => {
-    const user = persistence.getUser();
-    if (user) {
-      user.status = AvailabilityStatus.Focused;
-      persistence.saveUser(user);
-      networking?.updateUser(user);
-      updateTrayIcon(user, 0, timerIsRunning);
-      broadcastToWindows(IPC.PEER_UPDATED, user);
-    }
-  });
+  globalShortcut.register('CmdOrCtrl+Shift+A', () => applyStatusChangeFromShortcut(AvailabilityStatus.Available));
+  globalShortcut.register('CmdOrCtrl+Shift+P', () => applyStatusChangeFromShortcut(AvailabilityStatus.Occupied));
+  globalShortcut.register('CmdOrCtrl+Shift+F', () => applyStatusChangeFromShortcut(AvailabilityStatus.Focused));
 }

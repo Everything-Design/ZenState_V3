@@ -5,18 +5,38 @@ interface Props {
   onLogin: (user: User) => void;
 }
 
+// Lowercase letters, numbers, dot, underscore, dash. 2–32 chars. Keeps the
+// space readable in the team list and lets people pair name@team identifiers
+// later without a parser fight.
+const USERNAME_RE = /^[a-z0-9._-]{2,32}$/;
+
 export default function LoginView({ onLogin }: Props) {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Normalise on the fly so the user sees what will actually be saved.
+  const normalisedUsername = username.trim().toLowerCase().replace(/\s+/g, '');
+  const usernameValid = USERNAME_RE.test(normalisedUsername);
+  const nameValid = name.trim().length >= 2;
+  const canSubmit = nameValid && usernameValid;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !username.trim()) return;
+    if (!nameValid) {
+      setError('Please enter your name.');
+      return;
+    }
+    if (!usernameValid) {
+      setError('Username must be 2–32 chars: letters, numbers, dot, underscore, or dash.');
+      return;
+    }
+    setError(null);
 
     const user: User = {
       id: crypto.randomUUID(),
       name: name.trim(),
-      username: username.trim().toLowerCase().replace(/\s+/g, ''),
+      username: normalisedUsername,
       status: AvailabilityStatus.Available,
       lastSeen: new Date().toISOString(),
       totalFocusTime: 0,
@@ -54,13 +74,22 @@ export default function LoginView({ onLogin }: Props) {
           type="text"
           placeholder="Username"
           value={username}
-          onChange={(e) => setUsername(e.target.value)}
+          onChange={(e) => { setUsername(e.target.value); setError(null); }}
         />
+        {/* Live hint when the entered username won't be accepted. */}
+        {username.length > 0 && !usernameValid && (
+          <div style={{ fontSize: 10, color: 'var(--status-focused)', marginTop: -4 }}>
+            Letters, numbers, dot, underscore, dash. 2–32 chars.
+          </div>
+        )}
+        {error && (
+          <div style={{ fontSize: 11, color: 'var(--status-focused)', marginTop: 4 }}>{error}</div>
+        )}
 
         <button
           className="btn btn-primary"
           type="submit"
-          disabled={!name.trim() || !username.trim()}
+          disabled={!canSubmit}
           style={{ width: '100%', padding: '10px' }}
         >
           Get Started
