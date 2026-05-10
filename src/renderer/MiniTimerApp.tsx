@@ -247,8 +247,11 @@ export default function MiniTimerApp() {
   const label = timer.taskLabel || 'No task';
   const truncated = label.length > 18 ? label.slice(0, 18) + '…' : label;
 
-  // Filter out the currently-running task from switch options to avoid noise.
-  const switchablePinned = (plan?.items ?? []).filter((p) => p.content !== timer.taskLabel);
+  // Filter out the currently-running task and any completed items — the pill
+  // is for the in-the-moment switch, so completed work is just noise here.
+  // Users can still see their full list (including done items) on the
+  // dashboard Plan tab and in the popover.
+  const switchablePinned = (plan?.items ?? []).filter((p) => p.content !== timer.taskLabel && !p.completedAt);
 
   return (
     <div
