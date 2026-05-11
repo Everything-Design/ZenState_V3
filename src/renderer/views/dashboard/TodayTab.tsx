@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, Play, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare } from 'lucide-react';
+import { Plus, Play, Pause, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare } from 'lucide-react';
 import {
   IPC, TodayPlan, PinnedTodo, RecentTodo,
   BasecampAuthState, BasecampProject, BasecampTodoList, BasecampTodo, DailyRecord,
@@ -168,12 +168,15 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
                 key={item.todoId}
                 item={item}
                 running={isRunning(item)}
+                paused={isRunning(item) && timerState.isPaused}
                 trackedToday={trackedByTodoId.get(item.todoId) ?? 0}
                 editingEstimate={editingEstimate === item.todoId}
                 onStartEditEstimate={() => setEditingEstimate(item.todoId)}
                 onSaveEstimate={(min) => handleSetEstimate(item.todoId, min)}
                 onCancelEditEstimate={() => setEditingEstimate(null)}
                 onStartTimer={() => handleStartTimer(item)}
+                onPauseTimer={() => window.zenstate.pauseTimer()}
+                onResumeTimer={() => window.zenstate.resumeTimer()}
                 onStopTimer={() => window.zenstate.stopTimer()}
                 onUnpin={() => handleUnpin(item.todoId)}
                 onToggleComplete={() => handleToggleComplete(item.todoId)}
@@ -283,21 +286,24 @@ function EmptyState({ icon, title, body, action }: { icon: React.ReactNode; titl
 interface PinnedRowProps {
   item: PinnedTodo;
   running: boolean;
+  paused: boolean;
   trackedToday: number;
   editingEstimate: boolean;
   onStartEditEstimate: () => void;
   onSaveEstimate: (minutes: number | null) => void;
   onCancelEditEstimate: () => void;
   onStartTimer: () => void;
+  onPauseTimer: () => void;
+  onResumeTimer: () => void;
   onStopTimer: () => void;
   onUnpin: () => void;
   onToggleComplete: () => void;
 }
 
 function PinnedRow({
-  item, running, trackedToday, editingEstimate,
+  item, running, paused, trackedToday, editingEstimate,
   onStartEditEstimate, onSaveEstimate, onCancelEditEstimate,
-  onStartTimer, onStopTimer, onUnpin, onToggleComplete,
+  onStartTimer, onPauseTimer, onResumeTimer, onStopTimer, onUnpin, onToggleComplete,
 }: PinnedRowProps) {
   const [estimateInput, setEstimateInput] = useState(String(item.estimateMinutes ?? ''));
   const [hovered, setHovered] = useState(false);
@@ -409,13 +415,25 @@ function PinnedRow({
           </button>
         )}
 
-        {/* Start/Stop button — Start is disabled on completed tasks; user
-            must un-check first if they want to keep working on something
-            they marked done. */}
+        {/* Start / Pause / Resume / Stop. When the timer is running on this
+            task, show both Pause (or Resume) and Stop so the user doesn't
+            need to open the pill to pause. Start is disabled on completed
+            tasks — uncheck first to reuse. */}
         {running ? (
-          <button onClick={onStopTimer} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}>
-            <Square size={11} /> Stop
-          </button>
+          <div style={{ display: 'inline-flex', gap: 6 }}>
+            <button
+              onClick={paused ? onResumeTimer : onPauseTimer}
+              className="btn btn-secondary"
+              title={paused ? 'Resume' : 'Pause'}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}
+            >
+              {paused ? <Play size={11} /> : <Pause size={11} />}
+              {paused ? 'Resume' : 'Pause'}
+            </button>
+            <button onClick={onStopTimer} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}>
+              <Square size={11} /> Stop
+            </button>
+          </div>
         ) : (
           <button
             onClick={onStartTimer}

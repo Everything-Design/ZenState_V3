@@ -221,23 +221,40 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
           )}
         </div>
 
-        {/* Duration */}
+        {/* Duration — direct numeric input. Tap-and-stepper buttons were
+            slow for the common case (typing a different value). The inputs
+            clamp on blur so out-of-range values silently snap into bounds
+            instead of throwing an error. */}
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 11, color: 'var(--zen-secondary-text)', display: 'block', marginBottom: 4 }}>
             Duration
           </label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button className="btn btn-secondary" onClick={() => setHours(Math.max(0, hours - 1))}>−</button>
-              <span style={{ fontSize: 14, fontFamily: 'var(--font-mono)', width: 28, textAlign: 'center' }}>{hours}</span>
-              <button className="btn btn-secondary" onClick={() => setHours(Math.min(16, hours + 1))}>+</button>
-              <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>h</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="number"
+                min="0"
+                max="16"
+                value={hours}
+                onChange={(e) => setHours(parseInt(e.target.value, 10) || 0)}
+                onBlur={(e) => setHours(Math.min(16, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+                className="text-input"
+                style={{ width: 60, padding: '6px 8px', fontSize: 14, fontFamily: 'var(--font-mono)', textAlign: 'center' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>h</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button className="btn btn-secondary" onClick={() => setMinutes(Math.max(0, minutes - 1))}>−</button>
-              <span style={{ fontSize: 14, fontFamily: 'var(--font-mono)', width: 28, textAlign: 'center' }}>{minutes}</span>
-              <button className="btn btn-secondary" onClick={() => setMinutes(Math.min(59, minutes + 1))}>+</button>
-              <span style={{ fontSize: 11, color: 'var(--zen-secondary-text)' }}>m</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                value={minutes}
+                onChange={(e) => setMinutes(parseInt(e.target.value, 10) || 0)}
+                onBlur={(e) => setMinutes(Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+                className="text-input"
+                style={{ width: 60, padding: '6px 8px', fontSize: 14, fontFamily: 'var(--font-mono)', textAlign: 'center' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>m</span>
             </div>
           </div>
         </div>

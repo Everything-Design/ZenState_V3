@@ -347,50 +347,91 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
   onConfirm: (hours: string, notes: string) => void;
   onDiscard: () => void;
 }) {
-  const [hours, setHours] = useState(defaultHours);
-  const [notes, setNotes] = useState(defaultNotes);
-  const isValid = /^\d+(\.\d+)?$/.test(hours.trim()) && parseFloat(hours) > 0;
-  // Display the tracked time using the SAME rounding the input field uses,
-  // so the user sees consistent numbers (no "Tracked: 5m" with "0.00 hours").
+  // Display the tracked time in the same h/m format used everywhere else in
+  // the app, and let the user edit IN that format. Basecamp wants a decimal
+  // hours value — derive it from h/m and show it read-only so users can see
+  // exactly what's about to be posted without having to do the conversion.
   const totalMinutes = Math.round(seconds / 60);
-  const trackedH = Math.floor(totalMinutes / 60);
-  const trackedM = totalMinutes % 60;
-  const exact = trackedH > 0 && trackedM > 0
-    ? `${trackedH}h ${trackedM}m`
-    : trackedH > 0
-      ? `${trackedH}h`
-      : `${totalMinutes}m`;
+  const initialH = Math.floor(totalMinutes / 60);
+  const initialM = totalMinutes % 60;
+  const [editH, setEditH] = useState(initialH);
+  const [editM, setEditM] = useState(initialM);
+  const [notes, setNotes] = useState(defaultNotes);
+
+  // Convert the user's h+m back to the decimal hours Basecamp expects.
+  // Two decimal places matches the precision of the original `defaultHours`
+  // input and Basecamp's UI display.
+  const totalSeconds = editH * 3600 + editM * 60;
+  const decimalHours = (totalSeconds / 3600).toFixed(2);
+  const isValid = totalSeconds > 0;
+  // Keep defaultHours in scope so a TS warning about an unused prop doesn't
+  // fire — the value lives in initialH/initialM via the seconds path now.
+  void defaultHours;
+
   return (
     <div className="alert-panel fade-in" style={{ width: 380 }}>
       <div style={{ textAlign: 'center', fontSize: 32, marginBottom: 8 }}>📋</div>
       <div className="alert-title" style={{ textAlign: 'center', color: 'var(--zen-primary)' }}>
         Post to Basecamp?
       </div>
-      <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>
+      <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--zen-secondary-text)', marginBottom: 14 }}>
         <strong>{taskLabel}</strong>
       </div>
-      <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 14 }}>
-        Tracked: {exact}
+
+      {/* Editable h/m fields — match the format users see everywhere else
+          in the app. Decimal hours below auto-derive from these. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="number"
+            min="0"
+            max="16"
+            value={editH}
+            onChange={(e) => setEditH(parseInt(e.target.value, 10) || 0)}
+            onBlur={(e) => setEditH(Math.min(16, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+            style={{
+              width: 56,
+              padding: '6px 8px',
+              border: '1px solid var(--zen-divider)',
+              borderRadius: 6,
+              background: 'var(--zen-tertiary-bg)',
+              color: 'var(--zen-text)',
+              fontSize: 14,
+              fontFamily: 'var(--font-mono)',
+              textAlign: 'center',
+            }}
+            autoFocus
+          />
+          <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>h</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            value={editM}
+            onChange={(e) => setEditM(parseInt(e.target.value, 10) || 0)}
+            onBlur={(e) => setEditM(Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+            style={{
+              width: 56,
+              padding: '6px 8px',
+              border: '1px solid var(--zen-divider)',
+              borderRadius: 6,
+              background: 'var(--zen-tertiary-bg)',
+              color: 'var(--zen-text)',
+              fontSize: 14,
+              fontFamily: 'var(--font-mono)',
+              textAlign: 'center',
+            }}
+          />
+          <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>m</span>
+        </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, justifyContent: 'center' }}>
-        <input
-          type="text"
-          value={hours}
-          onChange={(e) => setHours(e.target.value)}
-          style={{
-            width: 80,
-            padding: '6px 10px',
-            border: '1px solid var(--zen-divider)',
-            borderRadius: 6,
-            background: 'var(--zen-tertiary-bg)',
-            color: 'var(--zen-text)',
-            fontSize: 14,
-            fontFamily: 'var(--font-mono)',
-            textAlign: 'right',
-          }}
-          autoFocus
-        />
-        <span style={{ fontSize: 13, color: 'var(--zen-secondary-text)' }}>hours</span>
+
+      {/* Read-only decimal preview — what Basecamp's timesheet will actually
+          store. Updates as you edit the h/m fields above. */}
+      <div style={{ textAlign: 'center', fontSize: 11, color: 'var(--zen-tertiary-text)', marginBottom: 14 }}>
+        Posts to Basecamp as <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--zen-secondary-text)' }}>{decimalHours} hr</strong>
       </div>
 
       {/* Notes — becomes the timesheet entry's description on Basecamp.
@@ -415,7 +456,7 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && isValid) {
-            onConfirm(hours.trim(), notes.trim());
+            onConfirm(decimalHours, notes.trim());
           }
         }}
       />
@@ -434,10 +475,10 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
         <button
           className="btn btn-primary"
           style={{ flex: 2 }}
-          onClick={() => onConfirm(hours.trim(), notes.trim())}
+          onClick={() => onConfirm(decimalHours, notes.trim())}
           disabled={!isValid}
         >
-          Post {isValid ? `${hours} hr` : ''}
+          Post {isValid ? `${decimalHours} hr` : ''}
         </button>
       </div>
     </div>

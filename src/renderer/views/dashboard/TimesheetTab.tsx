@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Pencil, Trash2, FileText } from 'lucide-react';
+import { Pencil, Trash2, FileText, Download } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 // Plain neutral tag for legacy session.category data — no per-category colors anymore.
@@ -183,13 +183,64 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
     return 0.2;
   }
 
+  // Build a CSV from the currently-filtered records and trigger a browser
+  // download. Columns chosen to be useful for invoicing + auditing:
+  // date, task, project, hh:mm + decimal hours, notes, Basecamp sync state.
+  function escapeCsv(v: string | number | undefined | null): string {
+    if (v === undefined || v === null) return '';
+    const s = String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  }
+  function handleDownloadCsv() {
+    const header = ['Date', 'Started', 'Task', 'Project', 'Category', 'Duration (h:m)', 'Decimal hours', 'Notes', 'Basecamp todo ID', 'Synced'];
+    const rows: string[][] = [header];
+    // Sort: oldest first within the CSV for spreadsheet readability.
+    const sorted = [...filteredRecords].sort((a, b) => a.date.localeCompare(b.date));
+    sorted.forEach((rec) => {
+      const dateStr = rec.date.split('T')[0];
+      [...rec.sessions]
+        .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+        .forEach((s) => {
+          const mins = Math.round(s.duration / 60);
+          const h = Math.floor(mins / 60);
+          const m = mins % 60;
+          const hm = `${h}h ${m}m`;
+          const dec = (s.duration / 3600).toFixed(2);
+          rows.push([
+            dateStr,
+            s.startTime ? new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+            s.taskLabel,
+            '', // project name isn't stored on the session directly; left blank for now
+            s.category ?? '',
+            hm,
+            dec,
+            s.notes ?? '',
+            s.basecamp?.todoId ? String(s.basecamp.todoId) : '',
+            s.basecamp?.synced ? 'yes' : (s.basecamp ? 'no' : ''),
+          ]);
+        });
+    });
+    const csv = rows.map((r) => r.map(escapeCsv).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const periodLabel = statPeriod === 'all' ? 'all-time' : statPeriod;
+    a.href = url;
+    a.download = `zenstate-timesheet-${periodLabel}-${getTodayDateStr()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="fade-in">
       <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>Timesheet</h1>
 
       {/* Overall Stats */}
       <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <span className="card-title" style={{ margin: 0 }}>Statistics</span>
           <div className="spacer" />
           {(['today', 'week', 'month', 'all'] as StatPeriod[]).map((period) => (
@@ -201,6 +252,27 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
               {period === 'today' ? 'Today' : period === 'week' ? 'This Week' : period === 'month' ? 'This Month' : 'All Time'}
             </button>
           ))}
+          {/* Exports the currently-filtered period as a CSV. Useful for invoicing,
+              reporting outside Basecamp, or sanity-checking what was tracked. */}
+          <button
+            onClick={handleDownloadCsv}
+            disabled={stats.totalSessions === 0}
+            title={stats.totalSessions === 0 ? 'No sessions in this period' : 'Download CSV of this period'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px',
+              fontSize: 'var(--text-xs)',
+              fontFamily: 'inherit',
+              background: 'var(--zen-tertiary-bg)',
+              border: '1px solid var(--zen-divider)',
+              borderRadius: 'var(--radius-pill)',
+              color: stats.totalSessions === 0 ? 'var(--zen-tertiary-text)' : 'var(--zen-text)',
+              cursor: stats.totalSessions === 0 ? 'not-allowed' : 'pointer',
+              opacity: stats.totalSessions === 0 ? 0.5 : 1,
+            }}
+          >
+            <Download size={11} /> CSV
+          </button>
         </div>
 
         {/* Stat Cards */}
@@ -331,8 +403,11 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
         <button className="btn btn-secondary" onClick={() => navigateMonth(1)}>▶</button>
       </div>
 
-      {/* Calendar */}
-      <div className="card">
+      {/* Calendar — capped width so the grid cells don't balloon on a
+          maximised dashboard. 720px gives ~100px per weekday column,
+          plenty for the daily totals + activity dots without looking
+          stretched. */}
+      <div className="card" style={{ maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
           <span className="card-title" style={{ margin: 0 }}>Activity Calendar</span>
           <div className="spacer" />
