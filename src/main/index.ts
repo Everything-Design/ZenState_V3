@@ -72,6 +72,15 @@ let pendingTimesheetEntry: {
 let timesheetConfirmAlertWin: BrowserWindow | null = null;
 let longRunAlertWin: BrowserWindow | null = null;
 
+// Mini-timer pill: when the pill is near the bottom of the screen and the
+// user expands the dropdown, we temporarily shift the window UP so the
+// dropdown isn't drawn off-screen. On collapse we restore the original Y.
+// `pillSavedY` is the user's intended position (what we persist + restore).
+// `pillProgrammaticMove` suppresses the 'moved' listener's persistence while
+// we're shifting programmatically, so the saved settings stay clean.
+let pillSavedY: number | null = null;
+let pillProgrammaticMove = false;
+
 // Break reminder state
 let breakReminderTimeout: NodeJS.Timeout | null = null;
 
@@ -376,6 +385,10 @@ function showMiniTimer() {
 
     miniTimerWindow.on('moved', () => {
       if (!miniTimerWindow || miniTimerWindow.isDestroyed()) return;
+      // Skip persistence when we just moved the window programmatically
+      // (the "shift up to fit the dropdown" case) — otherwise the shifted
+      // position would become the new saved default.
+      if (pillProgrammaticMove) return;
       const [x, y] = miniTimerWindow.getPosition();
       const s = persistence.getSettings();
       persistence.saveSettings({ ...s, miniTimerX: x, miniTimerY: y });
@@ -1098,6 +1111,35 @@ function setupIPC() {
     }
   });
 
+  // Open the dashboard, navigate to Plan, and auto-open the pin picker.
+  // Driven from the mini-timer pill's "Pin another to-do" link — saves the
+  // user a multi-step navigation when they're already in flow.
+  ipcMain.on(IPC.OPEN_DASHBOARD_AND_PIN, () => {
+    const navigate = (win: BrowserWindow) => {
+      win.webContents.send('dashboard:switch-tab', 'plan');
+      win.webContents.send('plan:open-picker');
+    };
+    if (!dashboardWindow || dashboardWindow.isDestroyed()) {
+      dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
+      if (process.platform === 'darwin') app.dock?.show();
+      dashboardWindow.on('closed', () => {
+        dashboardWindow = null;
+        if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
+          app.dock?.hide();
+        }
+      });
+      // Fire navigation + picker open once the renderer is ready to receive.
+      dashboardWindow.webContents.once('did-finish-load', () => {
+        if (dashboardWindow) navigate(dashboardWindow);
+      });
+    } else {
+      if (dashboardWindow.isMinimized()) dashboardWindow.restore();
+      dashboardWindow.show();
+      dashboardWindow.focus();
+      navigate(dashboardWindow);
+    }
+  });
+
   ipcMain.on(IPC.CLOSE_POPOVER, () => {
     popoverWindow?.hide();
   });
@@ -1744,15 +1786,51 @@ function setupIPC() {
   });
 
   // Mini-timer pill resize (renderer-driven). The pill expands to show the
-  // task switcher panel and shrinks back to compact when collapsed.
+  // task switcher panel and shrinks back to compact when collapsed. When
+  // expanding near the bottom of the screen, we temporarily shift the
+  // window UP so the dropdown doesn't render off-screen; on collapse we
+  // restore the user's saved Y.
   ipcMain.on(IPC.MINI_TIMER_RESIZE, (_e, size: { width: number; height: number }) => {
     if (!miniTimerWindow || miniTimerWindow.isDestroyed()) return;
-    // Anchor the resize at the top-right corner of the current frame so the
-    // pill grows downward instead of jumping somewhere new.
+    const { screen } = require('electron');
     const [x, y] = miniTimerWindow.getPosition();
-    const [oldW] = miniTimerWindow.getSize();
-    const newX = x + (oldW - size.width); // keep right edge in place
-    miniTimerWindow.setBounds({ x: newX, y, width: size.width, height: size.height });
+    const [oldW, oldH] = miniTimerWindow.getSize();
+    // Keep the right edge in place when width changes (compact 240 → expanded 300).
+    const newX = x + (oldW - size.width);
+
+    // Determine if we're expanding (going from compact to expanded) or
+    // collapsing (going back to compact). Compact height is 36px.
+    const COMPACT_H = 36;
+    const isExpanding = size.height > COMPACT_H + 4;
+
+    let newY = y;
+
+    if (isExpanding) {
+      // Find the display the pill currently sits on so we can measure its
+      // bottom edge correctly on multi-monitor setups.
+      const display = screen.getDisplayMatching({ x, y, width: oldW, height: oldH });
+      const wa = display.workArea;
+      const bottomMargin = 12;
+      const bottomEdge = wa.y + wa.height - bottomMargin;
+      if (y + size.height > bottomEdge) {
+        // Save the user's intended Y once (don't overwrite if we resize
+        // again while already shifted — e.g. dynamic panel height).
+        if (pillSavedY === null) pillSavedY = y;
+        newY = Math.max(wa.y + 8, bottomEdge - size.height);
+      }
+    } else {
+      // Collapsing — restore the saved Y if we had previously shifted.
+      if (pillSavedY !== null) {
+        newY = pillSavedY;
+        pillSavedY = null;
+      }
+    }
+
+    pillProgrammaticMove = true;
+    miniTimerWindow.setBounds({ x: newX, y: newY, width: size.width, height: size.height });
+    // Clear the flag on the next tick — setBounds fires 'moved' synchronously
+    // or microtask-soon, so a single setImmediate keeps the suppression tight.
+    setImmediate(() => { pillProgrammaticMove = false; });
   });
 
   // Mid-session notes. The pill writes to this on every keystroke (debounced

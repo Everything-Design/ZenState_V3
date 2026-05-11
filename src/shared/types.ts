@@ -265,6 +265,7 @@ export const IPC = {
 
   // Window management (renderer → main)
   OPEN_DASHBOARD: 'window:open-dashboard',
+  OPEN_DASHBOARD_AND_PIN: 'window:open-dashboard-and-pin',
   CLOSE_POPOVER: 'window:close-popover',
   QUIT_APP: 'app:quit',
 

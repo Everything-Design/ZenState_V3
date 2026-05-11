@@ -155,8 +155,9 @@ export default function MiniTimerApp() {
       // switchable item (≈50) + a bit of slack for headings/padding. Capped so
       // the pill never balloons past a reasonable size on small screens.
       const itemCount = plan?.items.length ?? 0;
-      const switcherHeight = itemCount > 0 ? 24 + 50 * itemCount + 16 : 56;
-      const height = Math.min(520, 36 + NOTES_SECTION_H + switcherHeight);
+      // Item rows + the bottom "+ Pin another to-do" button (~32px)
+      const switcherHeight = (itemCount > 0 ? 24 + 50 * itemCount + 16 : 56) + 32;
+      const height = Math.min(540, 36 + NOTES_SECTION_H + switcherHeight);
       window.zenstate.miniTimerResize({ width: EXPANDED_W, height });
     } else {
       window.zenstate.miniTimerResize({ width: COMPACT_W, height: COMPACT_H });
@@ -398,6 +399,33 @@ export default function MiniTimerApp() {
               ))}
             </>
           )}
+
+          {/* Quick-pin shortcut — keeps the user in flow when a new task
+              comes in mid-session. Opens the dashboard's Plan tab with the
+              picker auto-open; once pinned, the new task appears in this
+              list (today:changed event), and the user can close the
+              dashboard and resume from the pill. */}
+          <button
+            onClick={() => window.zenstate.openDashboardAndPin()}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 6,
+              width: '100%',
+              margin: '8px 0 4px',
+              padding: '8px 12px',
+              background: 'transparent',
+              border: 'none',
+              color: 'rgba(230,237,243,0.55)',
+              fontFamily: 'inherit',
+              fontSize: 11,
+              cursor: 'pointer',
+              transition: 'color 120ms ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#e6edf3'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(230,237,243,0.55)'; }}
+          >
+            + Pin another to-do
+          </button>
         </div>
       )}
     </div>

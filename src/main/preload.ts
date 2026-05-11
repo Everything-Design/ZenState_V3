@@ -20,6 +20,7 @@ const IPC = {
   SEND_EMERGENCY_REQUEST: 'user:send-emergency-request',
   GRANT_EMERGENCY_ACCESS: 'user:grant-emergency-access',
   OPEN_DASHBOARD: 'window:open-dashboard',
+  OPEN_DASHBOARD_AND_PIN: 'window:open-dashboard-and-pin',
   CLOSE_POPOVER: 'window:close-popover',
   QUIT_APP: 'app:quit',
   START_TIMER: 'timer:start',
@@ -107,6 +108,7 @@ const LISTEN_CHANNELS: string[] = [
   'update:available',
   'update:downloaded',
   'dashboard:switch-tab',
+  'plan:open-picker',
   'settings:updated',
   'license:changed',
   IPC.BC_AUTH_CHANGED,
@@ -187,6 +189,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   resumeTimer: () => ipcRenderer.send(IPC.RESUME_TIMER),
 
   openDashboard: (tab?: string) => ipcRenderer.send(IPC.OPEN_DASHBOARD, tab),
+  openDashboardAndPin: () => ipcRenderer.send(IPC.OPEN_DASHBOARD_AND_PIN),
   closePopover: () => ipcRenderer.send(IPC.CLOSE_POPOVER),
   quit: () => ipcRenderer.send(IPC.QUIT_APP),
   login: (user: unknown) => ipcRenderer.send('user:login', user),

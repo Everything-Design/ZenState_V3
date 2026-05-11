@@ -51,16 +51,22 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
   // async response can be clobbered by the (stale-by-then) response.
   useEffect(() => {
     let eventArrived = false;
-    const off = window.zenstate.on(IPC.TODAY_CHANGED, (...args: unknown[]) => {
+    const offChanged = window.zenstate.on(IPC.TODAY_CHANGED, (...args: unknown[]) => {
       eventArrived = true;
       setPlan(args[0] as TodayPlan);
+    });
+    // Main process triggers this when the user clicks "Pin another to-do"
+    // from the mini-timer pill — open the picker directly so they don't
+    // need to find the button themselves.
+    const offPicker = window.zenstate.on('plan:open-picker', () => {
+      setPickerOpen(true);
     });
     window.zenstate.todayGet().then((res) => {
       if (!eventArrived) setPlan(res.plan);
       setRecents(res.recents);
     }).catch(() => {});
     window.zenstate.bcGetAuthState().then(setAuthState).catch(() => {});
-    return off;
+    return () => { offChanged(); offPicker(); };
   }, []);
 
   const handlePin = useCallback(async (item: PinnedTodo) => {

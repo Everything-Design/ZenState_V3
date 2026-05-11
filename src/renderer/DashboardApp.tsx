@@ -22,6 +22,7 @@ declare global {
       pauseTimer: () => void;
       resumeTimer: () => void;
       openDashboard: (tab?: string) => void;
+      openDashboardAndPin: () => void;
       closePopover: () => void;
       quit: () => void;
       login: (user: User) => void;
