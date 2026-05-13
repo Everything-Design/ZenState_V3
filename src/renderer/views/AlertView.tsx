@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 interface Props {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'longRunGuard' | 'timesheetConfirm';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'longRunGuard' | 'timesheetConfirm' | 'idlePrompt';
   from: string;
   senderId: string;
   message?: string;
@@ -12,6 +12,7 @@ interface Props {
   onRespond: (accepted: boolean, message?: string) => void;
   onDismiss: () => void;
   onLongRunResponse?: (action: 'continue' | 'stop' | 'backdate', stopAtIso?: string) => void;
+  onIdleResponse?: (action: 'continue' | 'pause' | 'backdate', stopAtIso?: string, enableMeetingMode?: boolean) => void;
   onTimesheetConfirm?: (action: 'post' | 'discard', hours?: string, notes?: string) => void;
 }
 
@@ -25,7 +26,7 @@ function formatAlertDuration(seconds: number): string {
   return `${m}m`;
 }
 
-export default function AlertView({ type, from, senderId, message, accepted, targetDuration, elapsedSeconds, lastActivityAt, onRespond, onDismiss, onLongRunResponse, onTimesheetConfirm }: Props) {
+export default function AlertView({ type, from, senderId, message, accepted, targetDuration, elapsedSeconds, lastActivityAt, onRespond, onDismiss, onLongRunResponse, onIdleResponse, onTimesheetConfirm }: Props) {
   const [replyText, setReplyText] = useState('');
   const [selectedQuickReply, setSelectedQuickReply] = useState<string | null>(null);
   const isEmergency = type === 'emergencyRequest';
@@ -119,6 +120,64 @@ export default function AlertView({ type, from, senderId, message, accepted, tar
             onClick={() => { onLongRunResponse?.('stop'); onDismiss(); }}
           >
             Stop now
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Idle prompt — appears after the user has been idle for the configured
+  // threshold. Replaces the silent auto-pause. Same shape as the long-run
+  // guard but with a "I'm in a meeting" option that enables Meeting mode
+  // for this session so the prompt doesn't fire again.
+  if (type === 'idlePrompt') {
+    const lastActivityLabel = lastActivityAt ? new Date(lastActivityAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+    const showBackdate = !!(lastActivityAt && elapsedSeconds && (Date.now() - new Date(lastActivityAt).getTime()) > 60_000);
+    const idleMins = Math.round((elapsedSeconds || 0) / 60);
+    return (
+      <div className="alert-panel fade-in" style={{ width: 380 }}>
+        <div style={{ textAlign: 'center', fontSize: 32, marginBottom: 8 }}>💤</div>
+        <div className="alert-title" style={{ textAlign: 'center', color: 'var(--zen-primary)' }}>
+          Still working?
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--zen-secondary-text)', marginBottom: 4 }}>
+          <strong>{from}</strong>
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 12, color: 'var(--zen-tertiary-text)', marginBottom: 16 }}>
+          No keyboard or mouse activity for {idleMins} {idleMins === 1 ? 'minute' : 'minutes'}.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            className="btn btn-primary"
+            style={{ width: '100%' }}
+            onClick={() => { onIdleResponse?.('continue', undefined, true); onDismiss(); }}
+            title="Keep the timer running and silence idle prompts for the rest of this session"
+          >
+            I'm in a meeting — keep running
+          </button>
+          <button
+            className="btn btn-secondary"
+            style={{ width: '100%' }}
+            onClick={() => { onIdleResponse?.('continue'); onDismiss(); }}
+          >
+            Still working — keep running
+          </button>
+          {showBackdate && lastActivityAt && (
+            <button
+              className="btn btn-secondary"
+              style={{ width: '100%' }}
+              onClick={() => { onIdleResponse?.('backdate', lastActivityAt); onDismiss(); }}
+              title="Stop the timer and back-date the end to your last keyboard or mouse activity."
+            >
+              Walked away at {lastActivityLabel} — stop there
+            </button>
+          )}
+          <button
+            className="btn btn-secondary"
+            style={{ width: '100%' }}
+            onClick={() => { onIdleResponse?.('pause'); onDismiss(); }}
+          >
+            Pause now
           </button>
         </div>
       </div>

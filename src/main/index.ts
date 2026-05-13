@@ -530,19 +530,26 @@ function showBreakReminderAlert() {
 }
 
 // ── Idle Detection ──────────────────────────────────────────────
+// Meeting mode: when on, idle pause is suppressed for the active session.
+// Cleared on stopTimer. Renderer can toggle via TIMER_SET_MEETING_MODE.
+let meetingModeActive = false;
+// Tracks the open "still working?" idle prompt alert so we can dismiss it
+// on activity resumption + close it on sign-out / stop.
+let idlePromptAlertWin: BrowserWindow | null = null;
+let idlePromptResponded = false;
 
 function startIdleDetection(thresholdSeconds: number) {
   stopIdleDetection();
   idleCheckInterval = setInterval(() => {
     if (!timerIsRunning || timerIsPaused) return;
+    if (meetingModeActive) return; // Suppressed during meetings
+    if (idlePromptAlertWin) return; // Already prompting — don't open a second one
     const idleTime = powerMonitor.getSystemIdleTime();
     if (idleTime >= thresholdSeconds) {
-      pauseTimer();
-      broadcastToWindows(IPC.TIMER_AUTO_PAUSED, { idleTime });
-      new Notification({
-        title: 'Timer Auto-Paused',
-        body: `Your timer was paused after ${Math.floor(thresholdSeconds / 60)} minutes of inactivity.`,
-      }).show();
+      // Don't silently pause. Show a prompt the user can dismiss as
+      // "still working" (with optional Meeting mode), pause now, or
+      // backdate the stop to their last keyboard activity.
+      showIdlePromptAlert(idleTime);
     }
   }, 10000); // Check every 10 seconds
 }
@@ -552,6 +559,33 @@ function stopIdleDetection() {
     clearInterval(idleCheckInterval);
     idleCheckInterval = null;
   }
+}
+
+function showIdlePromptAlert(idleTime: number) {
+  const alertWin = createAlertWindow(getRendererURL('alert.html'), {
+    width: 400,
+    height: 360,
+  });
+  idlePromptAlertWin = alertWin;
+  idlePromptResponded = false;
+  alertWin.webContents.once('did-finish-load', () => {
+    alertWin.webContents.send('alert-data', {
+      type: 'idlePrompt',
+      from: timerTaskLabel,
+      senderId: '',
+      elapsedSeconds: idleTime,
+      lastActivityAt: lastActivityIsoTime(),
+    });
+  });
+  // If the user dismisses without picking, treat as "continue working" —
+  // safer default than silent pause. Reset so we can prompt again later.
+  alertWin.on('closed', () => {
+    if (idlePromptAlertWin === alertWin) idlePromptAlertWin = null;
+    // If no explicit response came in, do nothing (timer keeps running).
+    // We don't re-arm anything because the next idle-check tick will
+    // re-evaluate naturally.
+    void idlePromptResponded;
+  });
 }
 
 // ── Status Auto-Revert ─────────────────────────────────────────
@@ -656,6 +690,8 @@ function startTimer(taskLabel: string, category?: string, targetDuration?: numbe
   timerIsRunning = true;
   currentSessionNotes = '';
   longRunGuardFired = false;
+  meetingModeActive = false; // Meeting mode is per-session; reset for a fresh start
+  broadcastToWindows(IPC.TIMER_MEETING_MODE_CHANGED, false);
   showMiniTimer();
 
   // Bump recents so the popover's quick-pick row stays useful.
@@ -936,6 +972,14 @@ function stopTimer() {
   timerTargetDuration = undefined;
   timerBasecamp = undefined;
   currentSessionNotes = '';
+  if (meetingModeActive) {
+    meetingModeActive = false;
+    broadcastToWindows(IPC.TIMER_MEETING_MODE_CHANGED, false);
+  }
+  if (idlePromptAlertWin && !idlePromptAlertWin.isDestroyed()) {
+    idlePromptAlertWin.destroy();
+  }
+  idlePromptAlertWin = null;
 
   broadcastToWindows(IPC.TIMER_UPDATE, {
     elapsed: 0,
@@ -1082,6 +1126,43 @@ function setupIPC() {
     }
   });
 
+  // Idle prompt response — user chooses to keep working (optionally with
+  // Meeting mode on), pause now, or backdate the stop to their last
+  // keyboard activity. Mirrors the long-run guard pattern.
+  ipcMain.on(IPC.TIMER_IDLE_RESPONSE, (_e, payload: { action: 'continue' | 'pause' | 'backdate'; stopAtIso?: string; enableMeetingMode?: boolean }) => {
+    idlePromptResponded = true;
+    if (!timerIsRunning) return;
+    if (payload.action === 'continue') {
+      // If the user enabled Meeting mode in the prompt, set it now so
+      // the next idle-check tick doesn't immediately re-prompt.
+      if (payload.enableMeetingMode) {
+        meetingModeActive = true;
+        broadcastToWindows(IPC.TIMER_MEETING_MODE_CHANGED, true);
+      }
+      return;
+    }
+    if (payload.action === 'pause') {
+      pauseTimer();
+      broadcastToWindows(IPC.TIMER_AUTO_PAUSED, { reason: 'idle-confirmed' });
+      return;
+    }
+    if (payload.action === 'backdate' && payload.stopAtIso) {
+      const stopAt = new Date(payload.stopAtIso).getTime();
+      const startWall = timerStartTime ? timerStartTime.getTime() - timerAccumulatedTime * 1000 : Date.now();
+      const correctedDuration = Math.max(0, (stopAt - startWall) / 1000);
+      timerAccumulatedTime = correctedDuration;
+      timerStartTime = null;
+      stopTimer();
+    }
+  });
+
+  // Meeting mode toggle from the pill's expanded panel. Per-session flag —
+  // cleared on stopTimer (in startTimer too, so a fresh session starts off).
+  ipcMain.on(IPC.TIMER_SET_MEETING_MODE, (_e, on: boolean) => {
+    meetingModeActive = !!on;
+    broadcastToWindows(IPC.TIMER_MEETING_MODE_CHANGED, meetingModeActive);
+  });
+
   // Time tracking data
   ipcMain.handle(IPC.GET_RECORDS, (_e, month?: string) => {
     if (month) return timeTracker.getRecordsForMonth(month);
@@ -1094,6 +1175,52 @@ function setupIPC() {
   ipcMain.handle(IPC.UPDATE_SESSION, (_e, data: { sessionId: string; date: string; updates: Parameters<typeof timeTracker.updateSession>[2] }) => {
     timeTracker.updateSession(data.sessionId, data.date, data.updates);
     return true;
+  });
+
+  // Manual session add — for "+ Add session" / "Log time" flows. Different
+  // from `stopTimer`'s implicit add in that the user explicitly typed the
+  // duration, so we skip the confirm popup and post to Basecamp directly
+  // (if the entry has a Basecamp link + meets the sub-minute floor).
+  ipcMain.handle(IPC.ADD_SESSION, async (_e, data: { taskLabel: string; duration: number; startTime: string; notes?: string; basecamp?: { accountId: number; projectId: number; todoId: number; todoListId?: number } | null }) => {
+    try {
+      if (!data.taskLabel?.trim()) return { ok: false, error: 'Task label required' };
+      if (!Number.isFinite(data.duration) || data.duration <= 0) return { ok: false, error: 'Duration must be greater than zero' };
+      const start = new Date(data.startTime);
+      if (Number.isNaN(start.getTime())) return { ok: false, error: 'Invalid start time' };
+      const endTime = new Date(start.getTime() + data.duration * 1000).toISOString();
+      const trimmedNotes = (data.notes ?? '').trim();
+      const link = data.basecamp ?? undefined;
+      const saved = timeTracker.addSession({
+        taskLabel: data.taskLabel.trim(),
+        duration: data.duration,
+        startTime: start.toISOString(),
+        endTime,
+        notes: trimmedNotes || undefined,
+        basecamp: link ? { ...link, synced: false } : undefined,
+      });
+
+      // Auto-post to Basecamp when the entry is linked + >= 1 minute. No
+      // confirm popup — the user already typed the duration. If the post
+      // fails, the session stays unsynced and Backfill picks it up.
+      if (link && data.duration >= 60) {
+        const hours = (data.duration / 3600).toFixed(2);
+        const date = isoDateLocal(start);
+        const description = trimmedNotes || data.taskLabel.trim();
+        basecamp.api.createTimesheetEntry({
+          todoId: link.todoId,
+          date,
+          hours,
+          description,
+        }).then(() => {
+          timeTracker.markSessionSynced(saved.sessionId, saved.dateStr);
+          broadcastToWindows('basecamp:timesheet-updated', { projectId: link.projectId, todoId: link.todoId });
+        }).catch((err) => console.warn('Manual session: Basecamp post failed (Backfill will retry):', err));
+      }
+
+      return { ok: true, sessionId: saved.sessionId, dateStr: saved.dateStr };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   });
 
   // Window management
@@ -1200,6 +1327,11 @@ function setupIPC() {
       longRunAlertWin.destroy();
     }
     longRunAlertWin = null;
+    if (idlePromptAlertWin && !idlePromptAlertWin.isDestroyed()) {
+      idlePromptAlertWin.destroy();
+    }
+    idlePromptAlertWin = null;
+    meetingModeActive = false;
 
     // Stop background timers tied to user state.
     cancelStatusRevertTimer();

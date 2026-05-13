@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AlertView from './views/AlertView';
 
 interface AlertData {
-  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'longRunGuard' | 'timesheetConfirm';
+  type: 'meetingRequest' | 'emergencyRequest' | 'meetingResponse' | 'timerComplete' | 'breakReminder' | 'longRunGuard' | 'timesheetConfirm' | 'idlePrompt';
   from: string;
   senderId: string;
   message?: string;
@@ -44,6 +44,9 @@ export default function AlertApp() {
       }}
       onLongRunResponse={(action, stopAtIso) => {
         window.zenstate.timerLongRunRespond({ action, stopAtIso });
+      }}
+      onIdleResponse={(action, stopAtIso, enableMeetingMode) => {
+        window.zenstate.timerIdleRespond({ action, stopAtIso, enableMeetingMode });
       }}
       onTimesheetConfirm={(action, hours, notes) => {
         window.zenstate.timerTimesheetConfirm({ action, hours, notes });

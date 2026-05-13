@@ -203,8 +203,26 @@ interface TomorrowRowProps {
 }
 
 function TomorrowRow({ item, editingEstimate, onStartEditEstimate, onSaveEstimate, onCancelEditEstimate, onUnpin }: TomorrowRowProps) {
-  const [estimateInput, setEstimateInput] = useState(String(item.estimateMinutes ?? ''));
+  // Hours + minutes inputs (stored as one minutes integer). Matches the
+  // pattern used everywhere else in the app — typing a 2h+ estimate without
+  // doing 60-times math in your head.
+  const initialH = Math.floor((item.estimateMinutes ?? 0) / 60);
+  const initialM = (item.estimateMinutes ?? 0) % 60;
+  const [estH, setEstH] = useState(initialH);
+  const [estM, setEstM] = useState(initialM);
   const [hovered, setHovered] = useState(false);
+
+  function formatEstimate(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  }
+  function commit() {
+    const total = estH * 60 + estM;
+    onSaveEstimate(total > 0 ? total : null);
+  }
 
   return (
     <div
@@ -238,26 +256,33 @@ function TomorrowRow({ item, editingEstimate, onStartEditEstimate, onSaveEstimat
           <input
             type="number"
             min="0"
-            max="600"
-            value={estimateInput}
+            max="16"
+            value={estH}
             autoFocus
-            onChange={(e) => setEstimateInput(e.target.value)}
+            onChange={(e) => setEstH(parseInt(e.target.value, 10) || 0)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const n = parseInt(estimateInput);
-                onSaveEstimate(Number.isFinite(n) && n > 0 ? n : null);
-              } else if (e.key === 'Escape') {
-                onCancelEditEstimate();
-              }
-            }}
-            onBlur={() => {
-              const n = parseInt(estimateInput);
-              onSaveEstimate(Number.isFinite(n) && n > 0 ? n : null);
+              if (e.key === 'Enter') commit();
+              else if (e.key === 'Escape') onCancelEditEstimate();
             }}
             className="text-input"
-            style={{ width: 64, padding: '4px 8px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
+            style={{ width: 44, padding: '4px 6px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
           />
-          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>min</span>
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>h</span>
+          <input
+            type="number"
+            min="0"
+            max="59"
+            value={estM}
+            onChange={(e) => setEstM(parseInt(e.target.value, 10) || 0)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit();
+              else if (e.key === 'Escape') onCancelEditEstimate();
+            }}
+            onBlur={commit}
+            className="text-input"
+            style={{ width: 44, padding: '4px 6px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
+          />
+          <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>m</span>
         </div>
       ) : (
         <button
@@ -275,7 +300,7 @@ function TomorrowRow({ item, editingEstimate, onStartEditEstimate, onSaveEstimat
           onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
         >
           <Clock size={11} />
-          {item.estimateMinutes ? `${item.estimateMinutes}m` : 'Set estimate'}
+          {item.estimateMinutes ? formatEstimate(item.estimateMinutes) : 'Set estimate'}
         </button>
       )}
 

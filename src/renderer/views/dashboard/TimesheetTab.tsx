@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Pencil, Trash2, FileText, Download } from 'lucide-react';
+import { Pencil, Trash2, FileText, Download, Plus } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
+import AddSessionModal from '../../components/AddSessionModal';
 // Plain neutral tag for legacy session.category data — no per-category colors anymore.
 const plainCategoryTagStyle: React.CSSProperties = {
   display: 'inline-block',
@@ -74,6 +75,9 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
   const [showCalendar, setShowCalendar] = useState(true);
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  // "+ Add session" — log time the user spent without having started a timer.
+  // Posts to Basecamp immediately for linked entries.
+  const [addingSession, setAddingSession] = useState(false);
 
   // Filter records by period
   const filteredRecords = useMemo(() => {
@@ -236,7 +240,18 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
 
   return (
     <div className="fade-in">
-      <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 20 }}>Timesheet</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Timesheet</h1>
+        <div style={{ flex: 1 }} />
+        <button
+          className="btn btn-primary"
+          onClick={() => setAddingSession(true)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          title="Log time you spent without having started a timer"
+        >
+          <Plus size={14} /> Add session
+        </button>
+      </div>
 
       {/* Overall Stats */}
       <div className="card">
@@ -593,6 +608,17 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
           date={editingSession.date}
           onSave={handleSaveEdit}
           onClose={() => setEditingSession(null)}
+        />
+      )}
+
+      {/* Add Session Modal */}
+      {addingSession && (
+        <AddSessionModal
+          onClose={() => setAddingSession(false)}
+          onSaved={() => {
+            setAddingSession(false);
+            onRefreshRecords();
+          }}
         />
       )}
     </div>

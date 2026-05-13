@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Pause, Play, Square, ChevronDown, Briefcase, StickyNote } from 'lucide-react';
+import { Pause, Play, Square, ChevronDown, Briefcase, StickyNote, Video } from 'lucide-react';
 import { IPC, TodayPlan, PinnedTodo, AppSettings } from '../shared/types';
 
 interface TimerState {
@@ -32,16 +32,26 @@ export default function MiniTimerApp() {
   const [autoDim, setAutoDim] = useState(false);
   const [dimmed, setDimmed] = useState(false);
   const [notes, setNotes] = useState('');
+  // Meeting mode — suppresses idle pause for the active session. Toggled
+  // from the Notes header in this panel; main process owns the source of
+  // truth and broadcasts changes (so the in-meeting "I'm in a meeting" path
+  // from the idle prompt also reflects here).
+  const [meetingMode, setMeetingMode] = useState(false);
   const dimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notesSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Subscribe to timer state ─────────────────────────────────
   useEffect(() => {
-    const off = window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
+    const offTimer = window.zenstate.on(IPC.TIMER_UPDATE, (data: unknown) => {
       const t = data as TimerState;
       setTimer(t);
     });
-    return off;
+    // Listen for Meeting mode changes from main — main is the source of
+    // truth (so the idle prompt's "I'm in a meeting" button reflects here).
+    const offMeeting = window.zenstate.on(IPC.TIMER_MEETING_MODE_CHANGED, (...args: unknown[]) => {
+      setMeetingMode(!!args[0]);
+    });
+    return () => { offTimer(); offMeeting(); };
   }, []);
 
   // ── Load plan + settings; subscribe to changes. Subscribe before fetching
@@ -356,6 +366,32 @@ export default function MiniTimerApp() {
               marginBottom: 6,
             }}>
               <StickyNote size={10} /> Notes
+              <div style={{ flex: 1 }} />
+              {/* Meeting-mode toggle. When on, the "still working?" idle
+                  prompt is suppressed for this session — useful for video
+                  calls where the user isn't touching keyboard/mouse. */}
+              <button
+                onClick={() => window.zenstate.timerSetMeetingMode(!meetingMode)}
+                title={meetingMode ? 'Meeting mode on — idle pause suppressed' : 'Turn on Meeting mode (suppress idle pause)'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px',
+                  borderRadius: 10,
+                  background: meetingMode ? 'rgba(10, 132, 255, 0.22)' : 'transparent',
+                  border: meetingMode ? '1px solid rgba(10, 132, 255, 0.45)' : '1px solid rgba(255,255,255,0.08)',
+                  color: meetingMode ? 'var(--zen-primary, #0a84ff)' : 'rgba(230,237,243,0.55)',
+                  fontFamily: 'inherit',
+                  fontSize: 9,
+                  fontWeight: 600,
+                  letterSpacing: 0.5,
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                  transition: 'background 120ms ease, color 120ms ease',
+                }}
+              >
+                <Video size={10} />
+                {meetingMode ? 'In meeting' : 'Meeting'}
+              </button>
             </div>
             <textarea
               value={notes}

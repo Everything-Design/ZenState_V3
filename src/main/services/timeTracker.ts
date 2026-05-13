@@ -44,16 +44,23 @@ export class TimeTracker {
     };
   }
 
-  addSession(data: { taskLabel: string; category?: string; duration: number; startTime: string; endTime: string; basecamp?: DailySession['basecamp'] }): { sessionId: string; dateStr: string } {
+  // Add a session to a daily record. Date is derived from `startTime` so that
+  // manual entries logged for past days land in the correct `DailyRecord`
+  // (creating one if it doesn't exist yet). Optional `notes` mirrors the
+  // shape of `DailySession`.
+  addSession(data: { taskLabel: string; category?: string; duration: number; startTime: string; endTime: string; notes?: string; basecamp?: DailySession['basecamp'] }): { sessionId: string; dateStr: string } {
     const records = this.persistence.getRecords();
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    // Derive the date from startTime's local components, not from a separate
+    // `new Date()` — this is what makes back-dated manual entries land in
+    // the right day's DailyRecord.
+    const d = new Date(data.startTime);
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
     let record = records.find((r) => r.date.startsWith(dateStr));
     if (!record) {
       record = {
         id: uuidv4(),
-        date: dateStr, // Store as YYYY-MM-DD for reliable matching
+        date: dateStr,
         totalFocusTime: 0,
         sessions: [],
       };
@@ -67,6 +74,7 @@ export class TimeTracker {
       endTime: data.endTime,
       duration: data.duration,
       category: data.category,
+      notes: data.notes,
       basecamp: data.basecamp,
     };
 

@@ -284,6 +284,7 @@ export const IPC = {
   SAVE_USER: 'data:save-user',
   DELETE_SESSION: 'data:delete-session',
   UPDATE_SESSION: 'data:update-session',
+  ADD_SESSION: 'data:add-session',
 
   // Settings & Templates (renderer → main)
   GET_SETTINGS: 'data:get-settings',
@@ -300,6 +301,15 @@ export const IPC = {
 
   // Long-run timer guard (renderer → main)
   TIMER_LONG_RUN_RESPONSE: 'timer:long-run-response',
+
+  // Idle prompt: instead of silently auto-pausing after the idle threshold,
+  // show a "still working?" alert that the user can confirm or let lapse.
+  TIMER_IDLE_RESPONSE: 'timer:idle-response',
+
+  // Meeting mode: per-session toggle that suppresses idle pause entirely
+  // (for video calls where the user isn't touching keyboard/mouse).
+  TIMER_SET_MEETING_MODE: 'timer:set-meeting-mode',
+  TIMER_MEETING_MODE_CHANGED: 'timer:meeting-mode-changed',
 
   // Pre-flight Basecamp timesheet confirmation (renderer → main)
   TIMER_TIMESHEET_CONFIRM: 'timer:timesheet-confirm',

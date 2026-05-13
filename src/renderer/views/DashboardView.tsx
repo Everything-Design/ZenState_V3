@@ -325,6 +325,7 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             timerState={timerState}
             records={records}
             onOpenSettings={() => setActiveTab('settings')}
+            onRefreshRecords={onRefreshRecords}
           />
         )}
         {activeTab === 'team' && (

@@ -30,6 +30,7 @@ declare global {
       getRecords: (month?: string) => Promise<DailyRecord[]>;
       deleteSession: (sessionId: string, date: string) => Promise<boolean>;
       updateSession: (sessionId: string, date: string, updates: unknown) => Promise<boolean>;
+      addSession: (data: { taskLabel: string; duration: number; startTime: string; notes?: string; basecamp?: { accountId: number; projectId: number; todoId: number; todoListId?: number } | null }) => Promise<{ ok: boolean; sessionId?: string; dateStr?: string; error?: string }>;
       getAppVersion: () => Promise<string>;
       resetAllData: () => Promise<boolean>;
       installUpdate: () => void;
@@ -43,6 +44,8 @@ declare global {
       setStatusRevert: (seconds: number) => void;
       cancelStatusRevert: () => void;
       timerLongRunRespond: (payload: { action: 'continue' | 'stop' | 'backdate'; stopAtIso?: string }) => void;
+      timerIdleRespond: (payload: { action: 'continue' | 'pause' | 'backdate'; stopAtIso?: string; enableMeetingMode?: boolean }) => void;
+      timerSetMeetingMode: (on: boolean) => void;
       timerTimesheetConfirm: (payload: { action: 'post' | 'discard'; hours?: string; notes?: string }) => void;
       miniTimerResize: (size: { width: number; height: number }) => void;
       miniTimerMoveBy: (delta: { dx: number; dy: number }) => void;

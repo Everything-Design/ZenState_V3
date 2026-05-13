@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, Play, Pause, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare } from 'lucide-react';
+import { Plus, Play, Pause, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare, Timer } from 'lucide-react';
 import {
   IPC, TodayPlan, PinnedTodo, RecentTodo,
   BasecampAuthState, BasecampProject, BasecampTodoList, BasecampTodo, DailyRecord,
 } from '../../../shared/types';
+import AddSessionModal from '../../components/AddSessionModal';
 
 interface TimerState {
   elapsed: number;
@@ -16,6 +17,7 @@ interface Props {
   timerState: TimerState;
   records: DailyRecord[];
   onOpenSettings: () => void;
+  onRefreshRecords: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -39,12 +41,16 @@ function dayHeader(): string {
 
 // ── Main view ─────────────────────────────────────────────────────
 
-export default function TodayTab({ timerState, records, onOpenSettings }: Props) {
+export default function TodayTab({ timerState, records, onOpenSettings, onRefreshRecords }: Props) {
   const [plan, setPlan] = useState<TodayPlan>({ date: todayDateStr(), items: [] });
   const [recents, setRecents] = useState<RecentTodo[]>([]);
   const [authState, setAuthState] = useState<BasecampAuthState | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editingEstimate, setEditingEstimate] = useState<number | null>(null);
+  // "Log time" — manual session entry pre-filled with the clicked todo.
+  // Lets the user record time they spent on a pinned task without having
+  // started the live timer.
+  const [logTimeFor, setLogTimeFor] = useState<PinnedTodo | null>(null);
 
   // Initial load + reactive updates from the main process. Subscribe FIRST,
   // then fetch — otherwise an event arriving between the request and its
@@ -186,6 +192,7 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
                 onStopTimer={() => window.zenstate.stopTimer()}
                 onUnpin={() => handleUnpin(item.todoId)}
                 onToggleComplete={() => handleToggleComplete(item.todoId)}
+                onLogTime={() => setLogTimeFor(item)}
               />
             ))}
             <button
@@ -251,6 +258,27 @@ export default function TodayTab({ timerState, records, onOpenSettings }: Props)
           onClose={() => setPickerOpen(false)}
         />
       )}
+
+      {/* Log time modal — pre-filled with the clicked todo's Basecamp link
+          and label. The user just enters duration + optional notes. */}
+      {logTimeFor && (
+        <AddSessionModal
+          prefill={{
+            taskLabel: logTimeFor.content,
+            basecamp: {
+              accountId: logTimeFor.accountId,
+              projectId: logTimeFor.projectId,
+              todoId: logTimeFor.todoId,
+              todoListId: logTimeFor.todoListId,
+            },
+          }}
+          onClose={() => setLogTimeFor(null)}
+          onSaved={() => {
+            setLogTimeFor(null);
+            onRefreshRecords();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -304,20 +332,44 @@ interface PinnedRowProps {
   onStopTimer: () => void;
   onUnpin: () => void;
   onToggleComplete: () => void;
+  onLogTime: () => void;
 }
 
 function PinnedRow({
   item, running, paused, trackedToday, editingEstimate,
   onStartEditEstimate, onSaveEstimate, onCancelEditEstimate,
-  onStartTimer, onPauseTimer, onResumeTimer, onStopTimer, onUnpin, onToggleComplete,
+  onStartTimer, onPauseTimer, onResumeTimer, onStopTimer, onUnpin, onToggleComplete, onLogTime,
 }: PinnedRowProps) {
-  const [estimateInput, setEstimateInput] = useState(String(item.estimateMinutes ?? ''));
+  // Two-field estimate (hours + minutes). The stored value is still a single
+  // minutes integer — we just split for the UI so anyone planning a 2h+ task
+  // doesn't have to type "120" minutes.
+  const initialEstH = Math.floor((item.estimateMinutes ?? 0) / 60);
+  const initialEstM = (item.estimateMinutes ?? 0) % 60;
+  const [estH, setEstH] = useState(initialEstH);
+  const [estM, setEstM] = useState(initialEstM);
   const [hovered, setHovered] = useState(false);
   const isComplete = !!item.completedAt;
 
   const estimateSec = (item.estimateMinutes ?? 0) * 60;
   const progress = estimateSec > 0 ? Math.min(1, trackedToday / estimateSec) : 0;
   const overEstimate = estimateSec > 0 && trackedToday > estimateSec;
+
+  // Pretty-print the estimate value next to tracked time. Examples:
+  //   30 min → "30m"
+  //   90 min → "1h 30m"
+  //   120 min → "2h"
+  function formatEstimate(mins: number): string {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h > 0 && m > 0) return `${h}h ${m}m`;
+    if (h > 0) return `${h}h`;
+    return `${m}m`;
+  }
+
+  function commitEstimate() {
+    const total = estH * 60 + estM;
+    onSaveEstimate(total > 0 ? total : null);
+  }
 
   return (
     <div
@@ -370,32 +422,41 @@ function PinnedRow({
           </div>
         </div>
 
-        {/* Estimate / tracked */}
+        {/* Estimate / tracked. Editing splits into two number inputs (hours
+            and minutes) so a 2h+ task doesn't need typing "120". The stored
+            value is still a single minutes integer. */}
         {editingEstimate ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input
               type="number"
               min="0"
-              max="600"
-              value={estimateInput}
+              max="16"
+              value={estH}
               autoFocus
-              onChange={(e) => setEstimateInput(e.target.value)}
+              onChange={(e) => setEstH(parseInt(e.target.value, 10) || 0)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  const n = parseInt(estimateInput);
-                  onSaveEstimate(Number.isFinite(n) && n > 0 ? n : null);
-                } else if (e.key === 'Escape') {
-                  onCancelEditEstimate();
-                }
-              }}
-              onBlur={() => {
-                const n = parseInt(estimateInput);
-                onSaveEstimate(Number.isFinite(n) && n > 0 ? n : null);
+                if (e.key === 'Enter') commitEstimate();
+                else if (e.key === 'Escape') onCancelEditEstimate();
               }}
               className="text-input"
-              style={{ width: 64, padding: '4px 8px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
+              style={{ width: 44, padding: '4px 6px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
             />
-            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>min</span>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>h</span>
+            <input
+              type="number"
+              min="0"
+              max="59"
+              value={estM}
+              onChange={(e) => setEstM(parseInt(e.target.value, 10) || 0)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitEstimate();
+                else if (e.key === 'Escape') onCancelEditEstimate();
+              }}
+              onBlur={commitEstimate}
+              className="text-input"
+              style={{ width: 44, padding: '4px 6px', fontSize: 'var(--text-sm)', textAlign: 'right' }}
+            />
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>m</span>
           </div>
         ) : (
           <button
@@ -414,7 +475,7 @@ function PinnedRow({
           >
             <Clock size={11} />
             {item.estimateMinutes
-              ? `${formatHM(trackedToday)} / ${item.estimateMinutes}m`
+              ? `${formatHM(trackedToday)} / ${formatEstimate(item.estimateMinutes)}`
               : trackedToday > 0
                 ? formatHM(trackedToday)
                 : 'Set estimate'}
@@ -455,6 +516,24 @@ function PinnedRow({
             <Play size={11} /> Start
           </button>
         )}
+
+        {/* Log time (visible on hover) — manual session entry pre-filled
+            with this todo. For times worked outside the live timer. */}
+        <button
+          onClick={onLogTime}
+          title="Log time spent on this task without starting the timer"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'var(--zen-tertiary-text)',
+            padding: 4, borderRadius: 4,
+            opacity: hovered ? 0.85 : 0,
+            transition: 'opacity var(--duration-quick) var(--ease-standard)',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = hovered ? '0.85' : '0'}
+        >
+          <Timer size={14} />
+        </button>
 
         {/* Unpin (visible on hover) */}
         <button

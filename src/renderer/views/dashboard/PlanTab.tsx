@@ -14,6 +14,7 @@ interface Props {
   timerState: TimerState;
   records: DailyRecord[];
   onOpenSettings: () => void;
+  onRefreshRecords: () => void;
 }
 
 type Sub = 'today' | 'tomorrow';
@@ -21,7 +22,7 @@ type Sub = 'today' | 'tomorrow';
 // PlanTab — wraps the two day-views with a segmented sub-tab strip.
 // Today is the in-the-moment surface (timer, sessions, progress vs. estimate).
 // Tomorrow is the queueing surface — items get promoted at midnight.
-export default function PlanTab({ timerState, records, onOpenSettings }: Props) {
+export default function PlanTab({ timerState, records, onOpenSettings, onRefreshRecords }: Props) {
   const [sub, setSub] = useState<Sub>('today');
 
   return (
@@ -43,7 +44,7 @@ export default function PlanTab({ timerState, records, onOpenSettings }: Props) 
       </div>
 
       {sub === 'today' && (
-        <TodayTab timerState={timerState} records={records} onOpenSettings={onOpenSettings} />
+        <TodayTab timerState={timerState} records={records} onOpenSettings={onOpenSettings} onRefreshRecords={onRefreshRecords} />
       )}
       {sub === 'tomorrow' && (
         <TomorrowTab onOpenSettings={onOpenSettings} />
