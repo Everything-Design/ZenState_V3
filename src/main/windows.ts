@@ -50,12 +50,12 @@ export function createPopoverWindow(url: string): BrowserWindow {
   // can fire immediately after `show()` while the underlying full-screen
   // Space is still settling. A short grace window prevents the popover
   // from instantly disappearing the first time it's opened on top of a
-  // full-screen app.
+  // full-screen app. 500ms covers slower Space transitions reliably.
   let lastShownAt = 0;
   win.on('show', () => { lastShownAt = Date.now(); });
   win.on('blur', () => {
     if (!require('electron').app.isPackaged) return; // devtools focus in dev
-    if (Date.now() - lastShownAt < 250) return;       // ignore show→blur race
+    if (Date.now() - lastShownAt < 500) return;       // ignore show→blur race
     win.hide();
   });
 

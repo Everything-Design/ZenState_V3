@@ -217,19 +217,30 @@ function togglePopover() {
 
   if (popoverWindow.isVisible()) {
     popoverWindow.hide();
-  } else {
-    // Position near tray icon
-    const { positionPopover } = require('./tray');
-    positionPopover(popoverWindow);
-    popoverWindow.show();
-    popoverWindow.focus();
-    // Nudge the popover renderer to re-fetch its data. Covers two edge cases:
-    // (1) midnight rollover happened while the app was idle, so the cached
-    //     todayPlan in the renderer is stale.
-    // (2) any change broadcast that arrived while the popover was hidden but
-    //     before its listener was attached on first open.
-    popoverWindow.webContents.send('popover:shown');
+    return;
   }
+
+  // Position near tray icon
+  const { positionPopover } = require('./tray');
+  positionPopover(popoverWindow);
+
+  // Re-assert NSPanel visibility settings on every show — macOS resets
+  // `visibleOnFullScreen` after some Space transitions, which is why the
+  // popover sometimes vanishes (it's on a different Space, not gone).
+  // Setting these right before show() pins it to the *current* Space.
+  if (process.platform === 'darwin') {
+    popoverWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    popoverWindow.setAlwaysOnTop(true, 'screen-saver');
+  }
+
+  popoverWindow.show();
+  popoverWindow.focus();
+  // Nudge the popover renderer to re-fetch its data. Covers two edge cases:
+  // (1) midnight rollover happened while the app was idle, so the cached
+  //     todayPlan in the renderer is stale.
+  // (2) any change broadcast that arrived while the popover was hidden but
+  //     before its listener was attached on first open.
+  popoverWindow.webContents.send('popover:shown');
 }
 
 // ── Networking ─────────────────────────────────────────────────
