@@ -8,7 +8,7 @@ import { NetworkingService } from './networking/NetworkingService';
 import { PersistenceService } from './services/persistence';
 import { TimeTracker } from './services/timeTracker';
 import { setupUpdater, checkForUpdate } from './updater';
-import { IPC, AvailabilityStatus, User, MessageType, AppSettings, PinnedTodo } from '../shared/types';
+import { IPC, AvailabilityStatus, User, MessageType, AppSettings, PinnedTodo, MyAssignmentsDueScope } from '../shared/types';
 import { LicenseManager } from './services/licenseManager';
 import { BasecampService } from './services/basecamp';
 
@@ -435,17 +435,29 @@ function hideMiniTimer() {
 
 // ── Meeting Alerts ─────────────────────────────────────────────
 
+// v5.1.0 / B-3 fix — keyed cache of the most-recent alert-data payload per
+// alert webContents. Lets the renderer fetch via IPC.ALERT_GET_DATA on mount
+// if it missed the one-shot send-on-did-finish-load broadcast (race during
+// the renderer's preload-vs-event-subscribe window). Cleared on window close.
+const alertPayloads = new Map<number, unknown>();
+
+function bindAlertPayload(alertWin: BrowserWindow, payload: unknown) {
+  const id = alertWin.webContents.id;
+  alertPayloads.set(id, payload);
+  alertWin.webContents.once('did-finish-load', () => {
+    alertWin.webContents.send('alert-data', payload);
+  });
+  alertWin.on('closed', () => {
+    alertPayloads.delete(id);
+  });
+}
+
 function showMeetingRequestAlert(data: { from: string; senderId: string; message?: string }) {
   const alert = createAlertWindow(getRendererURL('alert.html'), {
     width: 360,
     height: 380,
   });
-  alert.webContents.once('did-finish-load', () => {
-    alert.webContents.send('alert-data', {
-      type: 'meetingRequest',
-      ...data,
-    });
-  });
+  bindAlertPayload(alert, { type: 'meetingRequest', ...data });
 }
 
 function showMeetingResponseAlert(data: { accepted: boolean; from: string; message?: string }) {
@@ -453,14 +465,12 @@ function showMeetingResponseAlert(data: { accepted: boolean; from: string; messa
     width: 360,
     height: data.message ? 300 : 240,
   });
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'meetingResponse',
-      from: data.from,
-      senderId: '',
-      accepted: data.accepted,
-      message: data.message,
-    });
+  bindAlertPayload(alertWin, {
+    type: 'meetingResponse',
+    from: data.from,
+    senderId: '',
+    accepted: data.accepted,
+    message: data.message,
   });
 }
 
@@ -469,12 +479,7 @@ function showEmergencyAlert(data: { from: string; senderId: string; message?: st
     width: 360,
     height: 380,
   });
-  alert.webContents.once('did-finish-load', () => {
-    alert.webContents.send('alert-data', {
-      type: 'emergencyRequest',
-      ...data,
-    });
-  });
+  bindAlertPayload(alert, { type: 'emergencyRequest', ...data });
 }
 
 function showTimerCompleteAlert(taskLabel: string, targetDuration: number, statusChanged: boolean) {
@@ -482,14 +487,12 @@ function showTimerCompleteAlert(taskLabel: string, targetDuration: number, statu
     width: 360,
     height: 280,
   });
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'timerComplete',
-      from: taskLabel,
-      senderId: '',
-      message: statusChanged ? 'Status changed to Occupied' : undefined,
-      targetDuration,
-    });
+  bindAlertPayload(alertWin, {
+    type: 'timerComplete',
+    from: taskLabel,
+    senderId: '',
+    message: statusChanged ? 'Status changed to Occupied' : undefined,
+    targetDuration,
   });
 }
 
@@ -519,13 +522,11 @@ function showBreakReminderAlert() {
     width: 360,
     height: 240,
   });
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'breakReminder',
-      from: 'Break Reminder',
-      senderId: '',
-      message: 'You\'ve been focused for a while. Take a short break to recharge!',
-    });
+  bindAlertPayload(alertWin, {
+    type: 'breakReminder',
+    from: 'Break Reminder',
+    senderId: '',
+    message: 'You\'ve been focused for a while. Take a short break to recharge!',
   });
 }
 
@@ -568,23 +569,21 @@ function showIdlePromptAlert(idleTime: number) {
   });
   idlePromptAlertWin = alertWin;
   idlePromptResponded = false;
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'idlePrompt',
-      from: timerTaskLabel,
-      senderId: '',
-      elapsedSeconds: idleTime,
-      lastActivityAt: lastActivityIsoTime(),
-    });
+  bindAlertPayload(alertWin, {
+    type: 'idlePrompt',
+    from: timerTaskLabel,
+    senderId: '',
+    elapsedSeconds: idleTime,
+    lastActivityAt: lastActivityIsoTime(),
   });
   // If the user dismisses without picking, treat as "continue working" —
   // safer default than silent pause. Reset so we can prompt again later.
   alertWin.on('closed', () => {
     if (idlePromptAlertWin === alertWin) idlePromptAlertWin = null;
-    // If no explicit response came in, do nothing (timer keeps running).
-    // We don't re-arm anything because the next idle-check tick will
-    // re-evaluate naturally.
-    void idlePromptResponded;
+    // Reading idlePromptResponded preserves the original sentinel intent —
+    // if an explicit response already came in, the IPC handler already ran;
+    // this branch is for the "dismissed without choosing" case.
+    if (idlePromptResponded) return;
   });
 }
 
@@ -771,14 +770,12 @@ function showLongRunAlert(elapsedSeconds: number) {
   });
   longRunAlertWin = alertWin;
   longRunResponded = false;
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'longRunGuard',
-      from: timerTaskLabel,
-      senderId: '',
-      elapsedSeconds,
-      lastActivityAt: lastActivityIsoTime(),
-    });
+  bindAlertPayload(alertWin, {
+    type: 'longRunGuard',
+    from: timerTaskLabel,
+    senderId: '',
+    elapsedSeconds,
+    lastActivityAt: lastActivityIsoTime(),
   });
   // If the user dismisses the alert with the OS X without picking an option,
   // treat it as "continue working" (least-destructive default) and reset the
@@ -799,17 +796,15 @@ function showTimesheetConfirmAlert(taskLabel: string, durationSec: number, notes
     height: 460,
   });
   timesheetConfirmAlertWin = alertWin;
-  alertWin.webContents.once('did-finish-load', () => {
-    alertWin.webContents.send('alert-data', {
-      type: 'timesheetConfirm',
-      from: taskLabel,
-      senderId: '',
-      elapsedSeconds: durationSec,
-      // Notes typed into the pill ride along as `message` — AlertView reads
-      // this into TimesheetConfirmPanel's `defaultNotes` so the user doesn't
-      // have to retype what they jotted down mid-session.
-      message: notes,
-    });
+  bindAlertPayload(alertWin, {
+    type: 'timesheetConfirm',
+    from: taskLabel,
+    senderId: '',
+    elapsedSeconds: durationSec,
+    // Notes typed into the pill ride along as `message` — AlertView reads
+    // this into TimesheetConfirmPanel's `defaultNotes` so the user doesn't
+    // have to retype what they jotted down mid-session.
+    message: notes,
   });
   // If the user dismisses the alert with Cmd+W / Alt+F4 / system X without
   // picking Post or Discard, the local session was already saved with
@@ -952,10 +947,27 @@ function stopTimer() {
         date,
         hours,
         description,
-      }).then(() => {
-        timeTracker.markSessionSynced(saved.sessionId, saved.dateStr);
+      }).then((entry) => {
+        // Persist the returned entry id alongside `synced: true` so future
+        // local edits/deletes can propagate to the same Basecamp entry.
+        const existing = timeTracker.findSession(saved.sessionId, saved.dateStr);
+        if (existing?.basecamp) {
+          timeTracker.updateSession(saved.sessionId, saved.dateStr, {
+            basecamp: { ...existing.basecamp, synced: true, entryId: entry.id },
+          });
+        } else {
+          timeTracker.markSessionSynced(saved.sessionId, saved.dateStr);
+        }
         broadcastToWindows('basecamp:timesheet-updated', { projectId: link.projectId, todoId: link.todoId });
-      }).catch((err) => console.warn('Failed to create Basecamp timesheet entry:', err));
+      }).catch((err) => {
+        console.warn('Failed to create Basecamp timesheet entry:', err);
+        broadcastToWindows('basecamp:timesheet-error', {
+          projectId: link.projectId,
+          todoId: link.todoId,
+          context: 'auto-post-on-stop',
+          message: (err as Error)?.message ?? 'Basecamp post failed',
+        });
+      });
     }
   }
 
@@ -1083,21 +1095,40 @@ function setupIPC() {
     const description = trimmedNotes || pending.taskLabel;
 
     try {
-      await basecamp.api.createTimesheetEntry({
+      const entry = await basecamp.api.createTimesheetEntry({
         todoId: link.todoId,
         date,
         hours,
         description,
       });
-      timeTracker.markSessionSynced(pending.sessionId, pending.sessionDateStr);
-      // Also persist the notes locally on the session so they show up in the
-      // Timesheet tab and survive a future re-sync.
-      if (trimmedNotes) {
-        timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, { notes: trimmedNotes });
+      // Persist entryId alongside synced=true and the notes in one write,
+      // so the row in TimesheetTab can later be edited and propagate to the
+      // same Basecamp entry.
+      const existing = timeTracker.findSession(pending.sessionId, pending.sessionDateStr);
+      if (existing?.basecamp) {
+        timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, {
+          basecamp: { ...existing.basecamp, synced: true, entryId: entry.id },
+          ...(trimmedNotes ? { notes: trimmedNotes } : {}),
+        });
+      } else {
+        timeTracker.markSessionSynced(pending.sessionId, pending.sessionDateStr);
+        if (trimmedNotes) {
+          timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, { notes: trimmedNotes });
+        }
       }
       broadcastToWindows('basecamp:timesheet-updated', { projectId: link.projectId, todoId: link.todoId });
     } catch (err) {
+      // B-2 fix: surface the failure via a broadcast so the popover/dashboard
+      // can show a toast. The alert window has already closed by this point,
+      // so the user has no way to know the post failed without this signal.
       console.warn('Failed to create confirmed Basecamp timesheet entry:', err);
+      broadcastToWindows('basecamp:timesheet-error', {
+        projectId: link.projectId,
+        todoId: link.todoId,
+        context: 'confirm-post',
+        sessionId: pending.sessionId,
+        message: (err as Error)?.message ?? 'Basecamp post failed',
+      });
     }
   });
 
@@ -1168,13 +1199,144 @@ function setupIPC() {
     if (month) return timeTracker.getRecordsForMonth(month);
     return timeTracker.getAllRecords();
   });
-  ipcMain.handle(IPC.DELETE_SESSION, (_e, data: { sessionId: string; date: string }) => {
+  // v5.1.0 — Delete a session locally AND remove the matching Basecamp entry
+  // when one exists. Reads `entryId` before the local delete (otherwise we'd
+  // lose it). Local delete always proceeds; Basecamp errors are surfaced.
+  ipcMain.handle(IPC.DELETE_SESSION, async (_e, data: { sessionId: string; date: string }) => {
+    const session = timeTracker.findSession(data.sessionId, data.date);
+    if (!session) return { ok: false, error: 'Session not found', basecampDeleted: false };
+
+    const entryId = session.basecamp?.entryId;
+    const hadBasecampLink = !!session.basecamp?.todoId;
+
     timeTracker.deleteSession(data.sessionId, data.date);
-    return true;
+
+    if (!entryId) {
+      // Either never linked, or pre-v5.1.0 session without persisted entryId.
+      // Renderer surfaces a "fix manually" warning when hadBasecampLink is true.
+      return { ok: true, basecampDeleted: false, hadBasecampLink };
+    }
+
+    try {
+      await basecamp.api.deleteTimesheetEntry(entryId);
+      broadcastToWindows('basecamp:timesheet-updated', { projectId: session.basecamp?.projectId, todoId: session.basecamp?.todoId });
+      return { ok: true, basecampDeleted: true, hadBasecampLink };
+    } catch (err) {
+      console.warn('Local session deleted but Basecamp delete failed:', err);
+      return { ok: true, basecampDeleted: false, hadBasecampLink, error: (err as Error)?.message ?? 'Basecamp delete failed' };
+    }
   });
-  ipcMain.handle(IPC.UPDATE_SESSION, (_e, data: { sessionId: string; date: string; updates: Parameters<typeof timeTracker.updateSession>[2] }) => {
+
+  // v5.1.0 — Propagate session edits to Basecamp. Four cases based on the
+  // before/after Basecamp link state:
+  //   A. linked → same todo  → PUT /timesheet_entries/{id} (update in place)
+  //   B. linked → diff todo  → DELETE old + POST new (re-parenting via API is not supported)
+  //   C. linked → unlinked   → DELETE the entry
+  //   D. unlinked → linked   → POST new entry
+  // On any Basecamp failure, local session is flipped to synced=false so the
+  // Backfill flow can retry later.
+  ipcMain.handle(IPC.UPDATE_SESSION, async (_e, data: { sessionId: string; date: string; updates: Parameters<typeof timeTracker.updateSession>[2] }) => {
+    const before = timeTracker.findSession(data.sessionId, data.date);
+    if (!before) return { ok: false, error: 'Session not found' };
+
     timeTracker.updateSession(data.sessionId, data.date, data.updates);
-    return true;
+    const after = timeTracker.findSession(data.sessionId, data.date);
+    if (!after) return { ok: false, error: 'Session vanished after update' };
+
+    const bcBefore = before.basecamp;
+    const bcAfter = after.basecamp;
+    const bcConnected = basecamp.oauth.isConnected();
+    const hadEntry = !!bcBefore?.entryId;
+
+    // Default response — only mutated if we actually round-trip to Basecamp.
+    let basecampSynced = !!bcBefore?.synced;
+    let basecampError: string | undefined;
+    let needsManualFix = false;
+
+    const date = data.date.split('T')[0];
+    const description = (after.notes && after.notes.trim()) || after.taskLabel;
+    const hours = (after.duration / 3600).toFixed(2);
+
+    try {
+      // Case A — same link: update in place
+      if (hadEntry && bcAfter?.todoId && bcAfter.todoId === bcBefore!.todoId) {
+        if (!bcConnected) throw new Error('Basecamp is not connected');
+        const updated = await basecamp.api.updateTimesheetEntry(bcBefore!.entryId!, { date, hours, description });
+        timeTracker.updateSession(data.sessionId, data.date, {
+          basecamp: { ...bcAfter, synced: true, entryId: updated.id },
+        });
+        basecampSynced = true;
+      }
+      // Case B — re-link to a different todo: delete old, create new
+      else if (hadEntry && bcAfter?.todoId && bcAfter.todoId !== bcBefore!.todoId) {
+        if (!bcConnected) throw new Error('Basecamp is not connected');
+        try {
+          await basecamp.api.deleteTimesheetEntry(bcBefore!.entryId!);
+        } catch (delErr) {
+          // Old entry orphaned — log but don't block. User can fix manually.
+          console.warn('Re-link: failed to delete old Basecamp entry; continuing with create:', delErr);
+        }
+        const created = await basecamp.api.createTimesheetEntry({
+          todoId: bcAfter.todoId,
+          date,
+          hours,
+          description,
+        });
+        timeTracker.updateSession(data.sessionId, data.date, {
+          basecamp: { ...bcAfter, synced: true, entryId: created.id },
+        });
+        basecampSynced = true;
+      }
+      // Case C — unlink an entry that was on Basecamp: delete the entry
+      else if (hadEntry && !bcAfter) {
+        if (!bcConnected) throw new Error('Basecamp is not connected');
+        await basecamp.api.deleteTimesheetEntry(bcBefore!.entryId!);
+      }
+      // Case D — newly linked: create a fresh entry
+      else if (!bcBefore && bcAfter?.todoId) {
+        if (!bcConnected) throw new Error('Basecamp is not connected');
+        const created = await basecamp.api.createTimesheetEntry({
+          todoId: bcAfter.todoId,
+          date,
+          hours,
+          description,
+        });
+        timeTracker.updateSession(data.sessionId, data.date, {
+          basecamp: { ...bcAfter, synced: true, entryId: created.id },
+        });
+        basecampSynced = true;
+      }
+      // Pre-v5.1.0 session: synced locally but no entryId on file. Can't push
+      // to Basecamp without knowing which entry to update. Flag so the UI can
+      // tell the user to also fix in Basecamp manually.
+      else if (bcAfter?.todoId && bcAfter.synced && !hadEntry) {
+        needsManualFix = true;
+      }
+
+      // Broadcast so other surfaces refresh their views.
+      const touchedProject = bcAfter?.projectId ?? bcBefore?.projectId;
+      if (touchedProject) {
+        broadcastToWindows('basecamp:timesheet-updated', { projectId: touchedProject, todoId: bcAfter?.todoId });
+      }
+    } catch (err) {
+      // Reset synced so Backfill (or a future retry) catches the drift.
+      const current = timeTracker.findSession(data.sessionId, data.date);
+      if (current?.basecamp) {
+        timeTracker.updateSession(data.sessionId, data.date, {
+          basecamp: { ...current.basecamp, synced: false },
+        });
+      }
+      basecampSynced = false;
+      basecampError = (err as Error)?.message ?? 'Basecamp update failed';
+      console.warn('UPDATE_SESSION: Basecamp propagation failed:', err);
+    }
+
+    return {
+      ok: true,
+      basecampSynced,
+      needsManualFix,
+      error: basecampError,
+    };
   });
 
   // Manual session add — for "+ Add session" / "Log time" flows. Different
@@ -1211,10 +1373,27 @@ function setupIPC() {
           date,
           hours,
           description,
-        }).then(() => {
-          timeTracker.markSessionSynced(saved.sessionId, saved.dateStr);
+        }).then((entry) => {
+          // Persist entryId so future edits/deletes can propagate.
+          const existing = timeTracker.findSession(saved.sessionId, saved.dateStr);
+          if (existing?.basecamp) {
+            timeTracker.updateSession(saved.sessionId, saved.dateStr, {
+              basecamp: { ...existing.basecamp, synced: true, entryId: entry.id },
+            });
+          } else {
+            timeTracker.markSessionSynced(saved.sessionId, saved.dateStr);
+          }
           broadcastToWindows('basecamp:timesheet-updated', { projectId: link.projectId, todoId: link.todoId });
-        }).catch((err) => console.warn('Manual session: Basecamp post failed (Backfill will retry):', err));
+        }).catch((err) => {
+          console.warn('Manual session: Basecamp post failed (Backfill will retry):', err);
+          broadcastToWindows('basecamp:timesheet-error', {
+            projectId: link.projectId,
+            todoId: link.todoId,
+            context: 'manual-add',
+            sessionId: saved.sessionId,
+            message: (err as Error)?.message ?? 'Basecamp post failed',
+          });
+        });
       }
 
       return { ok: true, sessionId: saved.sessionId, dateStr: saved.dateStr };
@@ -1722,6 +1901,59 @@ function setupIPC() {
     }
   });
 
+  // v5.1.0 — Direct Basecamp time-entry update/delete. Most callers should go
+  // through UPDATE_SESSION/DELETE_SESSION which orchestrate local + remote;
+  // these are exposed for special cases (e.g. a future reconcile tool).
+  ipcMain.handle(IPC.BC_UPDATE_TIME_ENTRY, async (_e, data: { entryId: number; date?: string; hours?: string; description?: string; personId?: number }) => {
+    try {
+      return { ok: true, data: await basecamp.api.updateTimesheetEntry(data.entryId, data) };
+    } catch (err) {
+      return { ok: false, error: describeError(err, 'updateTimesheetEntry') };
+    }
+  });
+  ipcMain.handle(IPC.BC_DELETE_TIME_ENTRY, async (_e, data: { entryId: number }) => {
+    try {
+      await basecamp.api.deleteTimesheetEntry(data.entryId);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: describeError(err, 'deleteTimesheetEntry') };
+    }
+  });
+
+  // v5.1.0 — Pin UX shortcuts. /my/assignments removes the 3-layer drill for
+  // the common case; search/due back it up for the long tail.
+  ipcMain.handle(IPC.BC_GET_MY_ASSIGNMENTS, async () => {
+    try {
+      return { ok: true, data: await basecamp.api.getMyAssignments() };
+    } catch (err) {
+      return { ok: false, error: describeError(err, 'getMyAssignments') };
+    }
+  });
+  ipcMain.handle(IPC.BC_GET_MY_ASSIGNMENTS_DUE, async (_e, data: { scope: MyAssignmentsDueScope }) => {
+    try {
+      return { ok: true, data: await basecamp.api.getMyAssignmentsDue(data.scope) };
+    } catch (err) {
+      return { ok: false, error: describeError(err, 'getMyAssignmentsDue') };
+    }
+  });
+  ipcMain.handle(IPC.BC_SEARCH_TODOS, async (_e, data: { query: string }) => {
+    try {
+      const q = (data.query ?? '').trim();
+      if (q.length < 2) return { ok: true, data: [] };
+      return { ok: true, data: await basecamp.api.searchTodos(q) };
+    } catch (err) {
+      return { ok: false, error: describeError(err, 'searchTodos') };
+    }
+  });
+
+  // v5.1.0 / B-3 fix — alert windows fetch their payload on mount via this
+  // invoke as a fallback in case they missed the one-shot 'alert-data' send.
+  // Identified by the caller's webContents id, matched against the cache
+  // populated in bindAlertPayload().
+  ipcMain.handle(IPC.ALERT_GET_DATA, (e) => {
+    return alertPayloads.get(e.sender.id) ?? null;
+  });
+
   // One-shot backfill: scan local sessions tagged with a Basecamp todo that
   // haven't been pushed yet, group by (todoId, date), post each as a timesheet
   // entry, and mark them synced. Returns counts so the UI can report progress.
@@ -1774,14 +2006,24 @@ function setupIPC() {
       const hours = (totalSec / 3600).toFixed(2);
       const description = g.sessions[0].taskLabel;
       try {
-        await basecamp.api.createTimesheetEntry({
+        const entry = await basecamp.api.createTimesheetEntry({
           todoId: g.todoId,
           date: g.dateStr,
           hours,
           description,
         });
+        // Stamp the shared entryId on every session in the group so future
+        // edits/deletes of any of them propagate to the single Basecamp entry
+        // they were merged into.
         for (const s of g.sessions) {
-          timeTracker.markSessionSynced(s.sessionId, s.dateStr);
+          const existing = timeTracker.findSession(s.sessionId, s.dateStr);
+          if (existing?.basecamp) {
+            timeTracker.updateSession(s.sessionId, s.dateStr, {
+              basecamp: { ...existing.basecamp, synced: true, entryId: entry.id },
+            });
+          } else {
+            timeTracker.markSessionSynced(s.sessionId, s.dateStr);
+          }
           migrated++;
         }
         projectsTouched.add(g.projectId);
@@ -1823,6 +2065,26 @@ function setupIPC() {
     persistence.saveTodayPlan(plan);
     broadcastToWindows(IPC.TODAY_CHANGED, plan);
     return plan;
+  });
+
+  // v5.1.0 — batch pin from the new PinPicker. One persistence write +
+  // one broadcast instead of N round-trips. Already-pinned items are
+  // silently skipped (idempotent), preserving the single-pin semantics.
+  ipcMain.handle(IPC.TODAY_PIN_MANY, (_e, items: Parameters<typeof persistence.saveTodayPlan>[0]['items']) => {
+    const plan = persistence.getTodayPlan();
+    const existing = new Set(plan.items.map((p) => p.todoId));
+    let added = 0;
+    for (const item of items) {
+      if (existing.has(item.todoId)) continue;
+      plan.items.push(item);
+      existing.add(item.todoId);
+      added++;
+    }
+    if (added > 0) {
+      persistence.saveTodayPlan(plan);
+      broadcastToWindows(IPC.TODAY_CHANGED, plan);
+    }
+    return { plan, added };
   });
 
   ipcMain.handle(IPC.TODAY_UNPIN, (_e, todoId: number) => {
@@ -1885,6 +2147,23 @@ function setupIPC() {
     persistence.saveTomorrowPlan(plan);
     broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
     return plan;
+  });
+
+  ipcMain.handle(IPC.TOMORROW_PIN_MANY, (_e, items: PinnedTodo[]) => {
+    const plan = persistence.getTomorrowPlan();
+    const existing = new Set(plan.items.map((p) => p.todoId));
+    let added = 0;
+    for (const item of items) {
+      if (existing.has(item.todoId)) continue;
+      plan.items.push(item);
+      existing.add(item.todoId);
+      added++;
+    }
+    if (added > 0) {
+      persistence.saveTomorrowPlan(plan);
+      broadcastToWindows(IPC.TOMORROW_CHANGED, plan);
+    }
+    return { plan, added };
   });
 
   ipcMain.handle(IPC.TOMORROW_UNPIN, (_e, todoId: number) => {

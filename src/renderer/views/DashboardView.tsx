@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Users, ClipboardList, Settings, MessageCircle, Briefcase, CalendarDays } from 'lucide-react';
+import { Users, ClipboardList, Settings, MessageCircle, CalendarDays } from 'lucide-react';
 import { User, AvailabilityStatus, DailyRecord, LicenseState } from '../../shared/types';
 import TeamTab from './dashboard/TeamTab';
 import TimesheetTab from './dashboard/TimesheetTab';
 import SettingsTab from './dashboard/SettingsTab';
-import ProjectsTab from './dashboard/ProjectsTab';
 import PlanTab from './dashboard/PlanTab';
 
 interface TimerState {
@@ -58,7 +57,7 @@ function getStatusLabel(status: AvailabilityStatus): string {
   }
 }
 
-type Tab = 'plan' | 'team' | 'timesheet' | 'projects' | 'settings';
+type Tab = 'plan' | 'team' | 'timesheet' | 'settings';
 
 function formatRevertTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -75,7 +74,7 @@ export default function DashboardView({ currentUser, peers, timerState, records,
     // Legacy "today" requests (from older code paths or notifications) still
     // route to the renamed Plan tab so deep-links don't break.
     const normalised = requestedTab === 'today' ? 'plan' : requestedTab;
-    if (['plan', 'team', 'timesheet', 'projects', 'settings'].includes(normalised)) {
+    if (['plan', 'team', 'timesheet', 'settings'].includes(normalised)) {
       setActiveTab(normalised as Tab);
       onRequestedTabHandled?.();
     }
@@ -300,12 +299,6 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             <ClipboardList size={16} /> Timesheet
           </button>
           <button
-            className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
-            onClick={() => setActiveTab('projects')}
-          >
-            <Briefcase size={16} /> Projects
-          </button>
-          <button
             className={`tab-btn ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => setActiveTab('settings')}
           >
@@ -336,12 +329,6 @@ export default function DashboardView({ currentUser, peers, timerState, records,
             records={records}
             isPro={isPro}
             onRefreshRecords={onRefreshRecords}
-          />
-        )}
-        {activeTab === 'projects' && (
-          <ProjectsTab
-            timerState={timerState}
-            onOpenSettings={() => setActiveTab('settings')}
           />
         )}
         {activeTab === 'settings' && (

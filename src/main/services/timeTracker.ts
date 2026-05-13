@@ -95,6 +95,16 @@ export class TimeTracker {
     this.persistence.saveRecords(records);
   }
 
+  // Read a session by id. Used by the Basecamp sync handlers to capture the
+  // pre-update state (in particular, the existing `basecamp.entryId`) before
+  // applying local mutations.
+  findSession(sessionId: string, dateStr: string): DailySession | null {
+    const records = this.persistence.getRecords();
+    const record = records.find((r) => r.date.startsWith(dateStr.split('T')[0]));
+    if (!record) return null;
+    return record.sessions.find((s) => s.id === sessionId) ?? null;
+  }
+
   deleteSession(sessionId: string, dateStr: string) {
     const records = this.persistence.getRecords();
     const record = records.find((r) => r.date.startsWith(dateStr.split('T')[0]));

@@ -1,9 +1,24 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Plus, Play, Pause, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, MessageSquare, Timer } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { Plus, Play, Pause, Square, X, Clock, Briefcase, Check, ArrowLeft, Search, Timer, ChevronDown } from 'lucide-react';
 import {
   IPC, TodayPlan, PinnedTodo, RecentTodo,
   BasecampAuthState, BasecampProject, BasecampTodoList, BasecampTodo, DailyRecord,
+  MyAssignment, MyAssignmentsResponse, MyAssignmentsDueScope, TodoSearchResult,
 } from '../../../shared/types';
+
+// Bridge type — avoids `(window as any)` at every call site.
+const zs = window.zenstate as unknown as {
+  bcGetMyAssignments: () => Promise<{ ok: true; data: MyAssignmentsResponse } | { ok: false; error: string }>;
+  bcGetMyAssignmentsDue: (scope: string) => Promise<{ ok: true; data: MyAssignment[] } | { ok: false; error: string }>;
+  bcSearchTodos: (query: string) => Promise<{ ok: true; data: TodoSearchResult[] } | { ok: false; error: string }>;
+  bcListProjects: () => Promise<{ ok: true; data: BasecampProject[] } | { ok: false; error: string }>;
+  bcListTodoLists: (projectId: number, todoSetId: number) => Promise<{ ok: true; data: BasecampTodoList[] } | { ok: false; error: string }>;
+  bcListTodos: (projectId: number, todoListId: number) => Promise<{ ok: true; data: BasecampTodo[] } | { ok: false; error: string }>;
+  bcCreateTodo: (data: { projectId: number; todoListId: number; content: string }) => Promise<{ ok: true; data: BasecampTodo } | { ok: false; error: string }>;
+  bcPostComment: (data: { projectId: number; todoId: number; content: string }) => Promise<{ ok: true } | { ok: false; error: string }>;
+  todayPinMany: (items: PinnedTodo[]) => Promise<{ plan: TodayPlan; added: number }>;
+  tomorrowPinMany: (items: PinnedTodo[]) => Promise<{ plan: unknown; added: number }>;
+};
 import AddSessionModal from '../../components/AddSessionModal';
 
 interface TimerState {
@@ -75,10 +90,13 @@ export default function TodayTab({ timerState, records, onOpenSettings, onRefres
     return () => { offChanged(); offPicker(); };
   }, []);
 
-  const handlePin = useCallback(async (item: PinnedTodo) => {
-    const next = await window.zenstate.todayPin(item).catch(() => null);
-    if (next) setPlan(next);
-    setPickerOpen(false);
+  const handlePinned = useCallback(async (pinnedTodoIds: number[]) => {
+    // After batch pin, refresh plan from main process via today:get so the
+    // items appear in the plan list. todayPinMany already updated the store;
+    // we subscribe to TODAY_CHANGED so this is belt-and-suspenders.
+    void pinnedTodoIds;
+    const res = await window.zenstate.todayGet().catch(() => null);
+    if (res) { setPlan(res.plan); setRecents(res.recents); }
   }, []);
 
   const handleUnpin = useCallback(async (todoId: number) => {
@@ -108,10 +126,22 @@ export default function TodayTab({ timerState, records, onOpenSettings, onRefres
     // user just declared "done", which is contradictory and noisy in the
     // session log. Stop kicks the standard confirm-then-post flow.
     const item = plan.items.find((p) => p.todoId === todoId);
-    const wasIncomplete = item && !item.completedAt;
-    const isThisRunning = item && timerState.isRunning && timerState.taskLabel === item.content;
+    if (!item) return;
+    const wasIncomplete = !item.completedAt;
+    const isThisRunning = timerState.isRunning && timerState.taskLabel === item.content;
+
     if (wasIncomplete && isThisRunning) {
-      window.zenstate.stopTimer();
+      // Wait for the stop to land in main + the timer-update broadcast to come back,
+      // THEN toggle. This guarantees the records refresh fires after the session save.
+      await new Promise<void>((resolve) => {
+        const off = window.zenstate.on(IPC.TIMER_UPDATE as string, (state: unknown) => {
+          const s = state as { isRunning: boolean };
+          if (!s.isRunning) { off(); resolve(); }
+        });
+        window.zenstate.stopTimer();
+        // Safety timeout — don't hang forever.
+        setTimeout(() => { off(); resolve(); }, 2000);
+      });
     }
     const next = await window.zenstate.todayToggleComplete(todoId).catch(() => null);
     if (next) setPlan(next);
@@ -249,13 +279,16 @@ export default function TodayTab({ timerState, records, onOpenSettings, onRefres
       )}
 
       {/* Picker modal */}
-      {pickerOpen && authState?.isConnected && (
+      {pickerOpen && authState?.isConnected && authState.account && (
         <PinPicker
-          authState={authState}
+          open={pickerOpen}
+          mode="multi"
+          target="today"
           recents={recents}
           alreadyPinned={new Set(plan.items.map((i) => i.todoId))}
-          onPin={handlePin}
+          accountId={authState.account.id}
           onClose={() => setPickerOpen(false)}
+          onPinned={handlePinned}
         />
       )}
 
@@ -572,21 +605,720 @@ function PinnedRow({
   );
 }
 
-// ── Picker (modal, three-stage cascade with Recents row at top) ─────
+// ── PinPicker v2 ───────────────────────────────────────────────────
+// Multi-tab picker: My Todos / Due / Recents / Search / Browse.
+// Supports single (click-to-pin-close) and multi (checkmark + batch) modes.
 
 export interface PinPickerProps {
-  authState: BasecampAuthState;
+  open: boolean;
+  mode: 'multi' | 'single';
+  target: 'today' | 'tomorrow';
   recents: RecentTodo[];
   alreadyPinned: Set<number>;
-  onPin: (item: PinnedTodo) => void;
+  accountId: number;
   onClose: () => void;
-  // Title shown in the picker header — defaults to "Pin a to-do" but Tomorrow
-  // can override with "Pin to tomorrow" so the surface labels itself correctly.
+  onPinned?: (pinnedTodoIds: number[]) => void;
+  // v5.1.0 — when present (single mode), the picker hands the constructed
+  // PinnedTodo back to the caller WITHOUT calling todayPinMany/tomorrowPinMany.
+  // Used by AddSessionModal/SessionEditModal where the user is picking a
+  // Basecamp link for a session, not pinning to Today/Tomorrow.
+  onPickedItem?: (item: PinnedTodo) => void;
   title?: string;
 }
 
-export function PinPicker({ authState, recents, alreadyPinned, onPin, onClose, title }: PinPickerProps) {
-  const [step, setStep] = useState<'recents' | 'projects' | 'lists' | 'todos'>('recents');
+type PickerTab = 'mine' | 'due' | 'recents' | 'search' | 'browse';
+type BrowseStep = 'projects' | 'lists' | 'todos';
+const DUE_SCOPE_LABELS: { scope: MyAssignmentsDueScope; label: string }[] = [
+  { scope: 'overdue', label: 'Overdue' },
+  { scope: 'due_today', label: 'Today' },
+  { scope: 'due_tomorrow', label: 'Tomorrow' },
+  { scope: 'due_later_this_week', label: 'This week' },
+  { scope: 'due_next_week', label: 'Next week' },
+  { scope: 'due_later', label: 'Later' },
+];
+
+function stripEmTags(s: string): string {
+  return s.replace(/<\/?em>/g, '');
+}
+
+function assignmentToPinned(a: MyAssignment, accountId: number): PinnedTodo | null {
+  if (!a.parent?.id) return null;
+  return {
+    todoId: a.id, projectId: a.bucket.id, todoListId: a.parent.id,
+    accountId, content: a.content, projectName: a.bucket.name,
+  };
+}
+
+function searchResultToPinned(r: TodoSearchResult, accountId: number): PinnedTodo | null {
+  if (!r.parent?.id) return null;
+  return {
+    todoId: r.id, projectId: r.bucket.id, todoListId: r.parent.id,
+    accountId, content: stripEmTags(r.title), projectName: r.bucket.name,
+  };
+}
+
+export function PinPicker({ open, mode, target, recents, alreadyPinned, accountId, onClose, onPinned, onPickedItem, title }: PinPickerProps) {
+  const [tab, setTab] = useState<PickerTab>('browse');
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div
+        className="modal-content"
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: 520, display: 'flex', flexDirection: 'column', maxHeight: '80vh', padding: 0, overflow: 'hidden' }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 16px 0', gap: 8 }}>
+          <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, margin: 0, flex: 1, letterSpacing: '-0.01em' }}>
+            {title ?? (target === 'tomorrow' ? 'Pin to tomorrow' : 'Pin a to-do')}
+          </h3>
+          <button
+            onClick={onClose}
+            style={{ background: 'transparent', border: 'none', color: 'var(--zen-tertiary-text)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', borderRadius: 4 }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 2, padding: '12px 16px 0', borderBottom: '1px solid var(--zen-divider)', flexShrink: 0 }}>
+          {(['browse', 'search', 'mine', 'recents', 'due'] as PickerTab[]).map((t) => {
+            const labels: Record<PickerTab, string> = { mine: 'My Todos', due: 'Due', recents: 'Recents', search: 'Search', browse: 'Browse' };
+            return (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  fontSize: 'var(--text-sm)', fontWeight: tab === t ? 600 : 400,
+                  color: tab === t ? 'var(--zen-text)' : 'var(--zen-tertiary-text)',
+                  padding: '6px 10px 10px',
+                  borderBottom: tab === t ? '2px solid var(--zen-primary)' : '2px solid transparent',
+                  marginBottom: -1, fontFamily: 'inherit',
+                  transition: 'color var(--duration-quick) var(--ease-standard)',
+                }}
+              >
+                {labels[t]}
+              </button>
+            );
+          })}
+        </div>
+
+        <PickerBody
+          tab={tab}
+          mode={mode}
+          target={target}
+          recents={recents}
+          alreadyPinned={alreadyPinned}
+          accountId={accountId}
+          onClose={onClose}
+          onPinned={onPinned}
+          onPickedItem={onPickedItem}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── PickerBody — owns per-tab state + multi-select footer ──────────
+
+interface PickerBodyProps {
+  tab: PickerTab;
+  mode: 'multi' | 'single';
+  target: 'today' | 'tomorrow';
+  recents: RecentTodo[];
+  alreadyPinned: Set<number>;
+  accountId: number;
+  onClose: () => void;
+  onPinned?: (ids: number[]) => void;
+  onPickedItem?: (item: PinnedTodo) => void;
+}
+
+function PickerBody({ tab, mode, target, recents, alreadyPinned, accountId, onClose, onPinned, onPickedItem }: PickerBodyProps) {
+  const [pending, setPending] = useState<Map<number, PinnedTodo>>(new Map());
+  const [pinning, setPinning] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  const toggleItem = useCallback((item: PinnedTodo) => {
+    setPending((prev) => {
+      const next = new Map(prev);
+      if (next.has(item.todoId)) next.delete(item.todoId);
+      else next.set(item.todoId, item);
+      return next;
+    });
+  }, []);
+
+  const pinAll = useCallback(async () => {
+    if (pending.size === 0 || pinning) return;
+    setPinning(true); setPinError(null);
+    try {
+      const items = Array.from(pending.values());
+      if (target === 'tomorrow') await zs.tomorrowPinMany(items);
+      else await zs.todayPinMany(items);
+      onPinned?.(items.map((i) => i.todoId));
+      setPending(new Map());
+    } catch (e) {
+      setPinError((e as Error).message ?? 'Failed to pin');
+    } finally {
+      setPinning(false);
+    }
+  }, [pending, pinning, target, onPinned]);
+
+  const pinSingle = useCallback(async (item: PinnedTodo) => {
+    if (pinning) return;
+    // Modal pick-without-pin path: hand item back to caller, close, don't IPC.
+    if (onPickedItem) {
+      onPickedItem(item);
+      onClose();
+      return;
+    }
+    setPinning(true); setPinError(null);
+    try {
+      if (target === 'tomorrow') await zs.tomorrowPinMany([item]);
+      else await zs.todayPinMany([item]);
+      onPinned?.([item.todoId]);
+      onClose();
+    } catch (e) {
+      setPinError((e as Error).message ?? 'Failed to pin');
+      setPinning(false);
+    }
+  }, [pinning, target, onPinned, onPickedItem, onClose]);
+
+  const onRowClick = useCallback((item: PinnedTodo) => {
+    if (mode === 'single') pinSingle(item);
+    else toggleItem(item);
+  }, [mode, pinSingle, toggleItem]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 8px 4px' }}>
+        {tab === 'mine' && (
+          <MyTodosTab alreadyPinned={alreadyPinned} accountId={accountId} pending={pending} onRowClick={onRowClick} />
+        )}
+        {tab === 'due' && (
+          <DueTab alreadyPinned={alreadyPinned} accountId={accountId} pending={pending} onRowClick={onRowClick} />
+        )}
+        {tab === 'recents' && (
+          <RecentsTab recents={recents} alreadyPinned={alreadyPinned} pending={pending} onRowClick={onRowClick} />
+        )}
+        {tab === 'search' && (
+          <SearchTab alreadyPinned={alreadyPinned} accountId={accountId} pending={pending} onRowClick={onRowClick} />
+        )}
+        {tab === 'browse' && (
+          <BrowseTab alreadyPinned={alreadyPinned} accountId={accountId} pending={pending} onRowClick={onRowClick} />
+        )}
+      </div>
+
+      {mode === 'multi' && (
+        <div style={{
+          borderTop: '1px solid var(--zen-divider)', padding: '10px 16px',
+          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+          background: 'var(--zen-secondary-bg)',
+        }}>
+          <span style={{ flex: 1, fontSize: 'var(--text-sm)', color: 'var(--zen-secondary-text)' }}>
+            {pending.size > 0 ? `${pending.size} selected` : 'Select to-dos to pin'}
+          </span>
+          {pinError && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--status-focused)' }}>{pinError}</span>}
+          {pending.size > 0 && (
+            <button className="btn btn-secondary" onClick={() => setPending(new Map())} style={{ padding: '6px 12px', fontSize: 'var(--text-sm)' }}>
+              Cancel
+            </button>
+          )}
+          <button
+            className="btn btn-primary"
+            disabled={pending.size === 0 || pinning}
+            onClick={pinAll}
+            style={{ padding: '6px 14px', fontSize: 'var(--text-sm)', opacity: pending.size === 0 ? 0.45 : 1 }}
+          >
+            {pinning ? 'Pinning…' : pending.size > 0 ? `Pin ${pending.size} to-do${pending.size > 1 ? 's' : ''}` : 'Pin to-dos'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Shared selectable row ──────────────────────────────────────────
+
+interface SelectableRowProps {
+  todoId: number;
+  title: string;
+  subtitle: string;
+  dueOn?: string;
+  excerpt?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}
+
+function SelectableRow({ todoId: _todoId, title, subtitle, dueOn, excerpt, checked, disabled, onClick }: SelectableRowProps) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'flex', width: '100%', textAlign: 'left', alignItems: 'flex-start',
+        padding: '9px 10px', borderRadius: 'var(--radius-sm)',
+        background: checked ? 'rgba(10, 132, 255, 0.08)' : hovered ? 'var(--zen-hover)' : 'transparent',
+        border: `1px solid ${checked ? 'rgba(10, 132, 255, 0.2)' : 'transparent'}`,
+        cursor: disabled ? 'default' : 'pointer',
+        gap: 10, fontFamily: 'inherit',
+        transition: 'background var(--duration-quick) var(--ease-standard)',
+        opacity: disabled ? 0.45 : 1,
+      }}
+    >
+      <div style={{
+        width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 2,
+        border: checked ? 'none' : '1.5px solid var(--zen-divider)',
+        background: checked ? 'var(--zen-primary)' : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {checked && <Check size={9} color="white" strokeWidth={3} />}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 'var(--text-base)', color: 'var(--zen-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {subtitle}
+        </div>
+        {excerpt && (
+          <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic' }}>
+            {excerpt}
+          </div>
+        )}
+      </div>
+      {dueOn && (
+        <span style={{
+          fontSize: 10, color: 'var(--zen-secondary-text)',
+          background: 'var(--zen-tertiary-bg)', border: '1px solid var(--zen-divider)',
+          borderRadius: 4, padding: '1px 5px', flexShrink: 0, marginTop: 2,
+          fontFamily: 'var(--font-mono)',
+        }}>
+          {dueOn}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function TabLoading({ label }: { label: string }) {
+  return <div style={{ padding: 'var(--space-4)', textAlign: 'center', fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)' }}>{label}</div>;
+}
+
+function TabError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--status-focused)', textAlign: 'center' }}>{message}</span>
+      <button className="btn btn-secondary" onClick={onRetry} style={{ padding: '4px 12px', fontSize: 'var(--text-sm)' }}>Retry</button>
+    </div>
+  );
+}
+
+function TabEmpty({ label }: { label: string }) {
+  return <div style={{ padding: 'var(--space-4)', textAlign: 'center', fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)' }}>{label}</div>;
+}
+
+// ── My Todos tab ───────────────────────────────────────────────────
+
+interface MyTodosTabProps {
+  alreadyPinned: Set<number>;
+  accountId: number;
+  pending: Map<number, PinnedTodo>;
+  onRowClick: (item: PinnedTodo) => void;
+}
+
+function MyTodosTab({ alreadyPinned, accountId, pending, onRowClick }: MyTodosTabProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<MyAssignmentsResponse | null>(null);
+  const [created, setCreated] = useState<PinnedTodo[]>([]);
+  const fetched = useRef(false);
+
+  const fetchData = useCallback(() => {
+    setLoading(true); setError(null);
+    zs.bcGetMyAssignments()
+      .then((res) => { if (res.ok) setData(res.data); else setError(res.error); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (fetched.current) return;
+    fetched.current = true;
+    fetchData();
+  }, [fetchData]);
+
+  const handleCreated = (item: PinnedTodo) => {
+    setCreated((prev) => [item, ...prev]);
+    onRowClick(item);
+  };
+
+  if (loading && !data) return <TabLoading label="Loading your to-dos…" />;
+  if (error) return <TabError message={error} onRetry={fetchData} />;
+
+  const priorities = (data?.priorities ?? []).filter((a) => !alreadyPinned.has(a.id));
+  const nonPriorities = (data?.nonPriorities ?? []).filter((a) => !alreadyPinned.has(a.id));
+  const allEmpty = priorities.length === 0 && nonPriorities.length === 0 && created.length === 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {created.map((item) => (
+        <SelectableRow
+          key={item.todoId} todoId={item.todoId} title={item.content} subtitle={item.projectName}
+          checked={pending.has(item.todoId)} onClick={() => onRowClick(item)}
+        />
+      ))}
+      {priorities.length > 0 && (
+        <>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--zen-tertiary-text)', letterSpacing: '0.06em', textTransform: 'uppercase', padding: '6px 10px 2px' }}>
+            Priorities
+          </div>
+          {priorities.map((a) => {
+            const item = assignmentToPinned(a, accountId);
+            return (
+              <SelectableRow
+                key={a.id} todoId={a.id} title={a.content}
+                subtitle={`${a.bucket.name}${a.parent ? ` · ${a.parent.title}` : ''}`}
+                dueOn={a.dueOn} checked={pending.has(a.id)} disabled={!item}
+                onClick={() => item && onRowClick(item)}
+              />
+            );
+          })}
+        </>
+      )}
+      {nonPriorities.length > 0 && (
+        <>
+          {priorities.length > 0 && (
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--zen-tertiary-text)', letterSpacing: '0.06em', textTransform: 'uppercase', padding: '8px 10px 2px' }}>
+              Other
+            </div>
+          )}
+          {nonPriorities.map((a) => {
+            const item = assignmentToPinned(a, accountId);
+            return (
+              <SelectableRow
+                key={a.id} todoId={a.id} title={a.content}
+                subtitle={`${a.bucket.name}${a.parent ? ` · ${a.parent.title}` : ''}`}
+                dueOn={a.dueOn} checked={pending.has(a.id)} disabled={!item}
+                onClick={() => item && onRowClick(item)}
+              />
+            );
+          })}
+        </>
+      )}
+      {allEmpty && !loading && <TabEmpty label="No assigned to-dos." />}
+      <CreateTodoInline onCreated={handleCreated} accountId={accountId} />
+    </div>
+  );
+}
+
+// ── Inline Create form ─────────────────────────────────────────────
+
+interface CreateTodoInlineProps {
+  accountId: number;
+  onCreated: (item: PinnedTodo) => void;
+}
+
+function CreateTodoInline({ accountId, onCreated }: CreateTodoInlineProps) {
+  const [open, setOpen] = useState(false);
+  const [projects, setProjects] = useState<BasecampProject[]>([]);
+  const [lists, setLists] = useState<BasecampTodoList[]>([]);
+  const [selProject, setSelProject] = useState<BasecampProject | null>(null);
+  const [selList, setSelList] = useState<BasecampTodoList | null>(null);
+  const [content, setContent] = useState('');
+  const [loadingP, setLoadingP] = useState(false);
+  const [loadingL, setLoadingL] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadProjects = useCallback(() => {
+    if (projects.length > 0) return;
+    setLoadingP(true);
+    zs.bcListProjects()
+      .then((res) => { if (res.ok) setProjects(res.data); })
+      .catch(() => {})
+      .finally(() => setLoadingP(false));
+  }, [projects.length]);
+
+  useEffect(() => { if (open) loadProjects(); }, [open, loadProjects]);
+
+  const handleProjectChange = (id: number) => {
+    const p = projects.find((x) => x.id === id) ?? null;
+    setSelProject(p); setSelList(null); setLists([]);
+    if (!p?.todoSetId) return;
+    setLoadingL(true);
+    zs.bcListTodoLists(p.id, p.todoSetId)
+      .then((res) => { if (res.ok) setLists(res.data); })
+      .catch(() => {})
+      .finally(() => setLoadingL(false));
+  };
+
+  const handleCreate = async () => {
+    if (!selProject || !selList || !content.trim() || creating) return;
+    setCreating(true); setError(null);
+    try {
+      const res = await zs.bcCreateTodo({ projectId: selProject.id, todoListId: selList.id, content: content.trim() });
+      if (!res.ok) { setError(res.error); setCreating(false); return; }
+      const todo = res.data;
+      onCreated({ todoId: todo.id, projectId: selProject.id, todoListId: selList.id, accountId, content: todo.content, projectName: selProject.name });
+      setContent(''); setSelProject(null); setSelList(null); setLists([]); setOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        style={{
+          marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px',
+          borderRadius: 'var(--radius-sm)', background: 'transparent', border: 'none',
+          cursor: 'pointer', color: 'var(--zen-tertiary-text)', fontSize: 'var(--text-sm)', fontFamily: 'inherit',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--zen-secondary-text)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--zen-tertiary-text)'; }}
+      >
+        <Plus size={13} /> New to-do
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--zen-secondary-bg)', border: '1px solid var(--zen-divider)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <select
+        className="text-input"
+        value={selProject?.id ?? ''}
+        onChange={(e) => handleProjectChange(Number(e.target.value))}
+        style={{ fontSize: 'var(--text-sm)' }}
+        disabled={loadingP}
+      >
+        <option value="">{loadingP ? 'Loading projects…' : 'Choose project…'}</option>
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      <select
+        className="text-input"
+        value={selList?.id ?? ''}
+        onChange={(e) => setSelList(lists.find((l) => l.id === Number(e.target.value)) ?? null)}
+        disabled={!selProject || loadingL}
+        style={{ fontSize: 'var(--text-sm)' }}
+      >
+        <option value="">{loadingL ? 'Loading lists…' : 'Choose list…'}</option>
+        {lists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
+      </select>
+      <input
+        className="text-input"
+        placeholder="To-do content…"
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) handleCreate(); }}
+        style={{ fontSize: 'var(--text-sm)' }}
+      />
+      {error && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--status-focused)' }}>{error}</span>}
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+        <button className="btn btn-secondary" onClick={() => setOpen(false)} style={{ padding: '4px 10px', fontSize: 'var(--text-sm)' }}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!selProject || !selList || !content.trim() || creating}
+          onClick={handleCreate}
+          style={{ padding: '4px 12px', fontSize: 'var(--text-sm)' }}
+        >
+          {creating ? 'Creating…' : 'Create'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Due tab ────────────────────────────────────────────────────────
+
+interface DueTabProps {
+  alreadyPinned: Set<number>;
+  accountId: number;
+  pending: Map<number, PinnedTodo>;
+  onRowClick: (item: PinnedTodo) => void;
+}
+
+function DueTab({ alreadyPinned, accountId, pending, onRowClick }: DueTabProps) {
+  const [scope, setScope] = useState<MyAssignmentsDueScope>('due_today');
+  const [cache, setCache] = useState<Partial<Record<MyAssignmentsDueScope, MyAssignment[]>>>({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchScope = useCallback((s: MyAssignmentsDueScope) => {
+    if (cache[s]) return;
+    setLoading(true); setError(null);
+    zs.bcGetMyAssignmentsDue(s)
+      .then((res) => { if (res.ok) setCache((prev) => ({ ...prev, [s]: res.data })); else setError(res.error); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [cache]);
+
+  useEffect(() => { fetchScope(scope); }, [scope, fetchScope]);
+
+  const items = (cache[scope] ?? []).filter((a) => !alreadyPinned.has(a.id));
+  const retryScope = () => { setCache((c) => { const n = { ...c }; delete n[scope]; return n; }); fetchScope(scope); };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '4px 2px 2px' }}>
+        {DUE_SCOPE_LABELS.map(({ scope: s, label }) => (
+          <button
+            key={s}
+            onClick={() => setScope(s)}
+            style={{
+              padding: '3px 10px', borderRadius: 12,
+              border: `1px solid ${scope === s ? 'var(--zen-primary)' : 'var(--zen-divider)'}`,
+              background: scope === s ? 'rgba(10, 132, 255, 0.12)' : 'transparent',
+              color: scope === s ? 'var(--zen-primary)' : 'var(--zen-secondary-text)',
+              fontSize: 'var(--text-xs)', fontWeight: scope === s ? 600 : 400,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {loading && <TabLoading label="Loading…" />}
+      {error && <TabError message={error} onRetry={retryScope} />}
+      {!loading && !error && items.length === 0 && <TabEmpty label="Nothing due in this range." />}
+      {items.map((a) => {
+        const item = assignmentToPinned(a, accountId);
+        return (
+          <SelectableRow
+            key={a.id} todoId={a.id} title={a.content}
+            subtitle={`${a.bucket.name}${a.parent ? ` · ${a.parent.title}` : ''}`}
+            dueOn={a.dueOn} checked={pending.has(a.id)} disabled={!item}
+            onClick={() => item && onRowClick(item)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Recents tab ────────────────────────────────────────────────────
+
+interface RecentsTabProps {
+  recents: RecentTodo[];
+  alreadyPinned: Set<number>;
+  pending: Map<number, PinnedTodo>;
+  onRowClick: (item: PinnedTodo) => void;
+}
+
+function RecentsTab({ recents, alreadyPinned, pending, onRowClick }: RecentsTabProps) {
+  const filtered = recents.filter((r) => !alreadyPinned.has(r.todoId));
+  if (filtered.length === 0) return <TabEmpty label="No recent to-dos." />;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {filtered.map((r) => {
+        const item: PinnedTodo = { todoId: r.todoId, projectId: r.projectId, todoListId: r.todoListId, accountId: r.accountId, content: r.content, projectName: r.projectName };
+        return (
+          <SelectableRow
+            key={r.todoId} todoId={r.todoId} title={r.content} subtitle={r.projectName}
+            checked={pending.has(r.todoId)} onClick={() => onRowClick(item)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Search tab ─────────────────────────────────────────────────────
+
+interface SearchTabProps {
+  alreadyPinned: Set<number>;
+  accountId: number;
+  pending: Map<number, PinnedTodo>;
+  onRowClick: (item: PinnedTodo) => void;
+}
+
+function SearchTab({ alreadyPinned, accountId, pending, onRowClick }: SearchTabProps) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<TodoSearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const doSearch = useCallback((q: string) => {
+    if (q.length < 2) { setResults([]); return; }
+    setLoading(true); setError(null);
+    zs.bcSearchTodos(q)
+      .then((res) => {
+        if (res.ok) setResults(res.data.filter((r) => !alreadyPinned.has(r.id)));
+        else setError(res.error);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [alreadyPinned]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const q = e.target.value;
+    setQuery(q);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => doSearch(q), 300);
+  };
+
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ position: 'relative' }}>
+        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--zen-tertiary-text)', pointerEvents: 'none' }} />
+        <input
+          autoFocus
+          className="text-input"
+          placeholder="Search to-dos…"
+          value={query}
+          onChange={handleChange}
+          style={{ paddingLeft: 30 }}
+        />
+      </div>
+      {query.length < 2 && <TabEmpty label="Type at least 2 characters to search." />}
+      {query.length >= 2 && loading && <TabLoading label="Searching…" />}
+      {query.length >= 2 && error && <TabError message={error} onRetry={() => doSearch(query)} />}
+      {query.length >= 2 && !loading && !error && results.length === 0 && <TabEmpty label="No matches." />}
+      {results.map((r) => {
+        const item = searchResultToPinned(r, accountId);
+        return (
+          <SelectableRow
+            key={r.id} todoId={r.id} title={stripEmTags(r.title)}
+            subtitle={`${r.bucket.name}${r.parent ? ` · ${r.parent.title}` : ''}`}
+            excerpt={r.excerpt ? stripEmTags(r.excerpt) : undefined}
+            checked={pending.has(r.id)} disabled={!item}
+            onClick={() => item && onRowClick(item)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Browse tab (3-layer drill) ─────────────────────────────────────
+
+interface BrowseTabProps {
+  alreadyPinned: Set<number>;
+  accountId: number;
+  pending: Map<number, PinnedTodo>;
+  onRowClick: (item: PinnedTodo) => void;
+}
+
+function BrowseTab({ alreadyPinned, accountId, pending, onRowClick }: BrowseTabProps) {
+  const [step, setStep] = useState<BrowseStep>('projects');
   const [projects, setProjects] = useState<BasecampProject[]>([]);
   const [lists, setLists] = useState<BasecampTodoList[]>([]);
   const [todos, setTodos] = useState<BasecampTodo[]>([]);
@@ -595,361 +1327,181 @@ export function PinPicker({ authState, recents, alreadyPinned, onPin, onClose, t
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  // Inline note editor — keyed by todoId so only one note panel is open at a time.
-  // Mirrors the popover Projects view's note flow (write → bcPostComment → ✓).
-  const [noteOpenFor, setNoteOpenFor] = useState<number | null>(null);
-  const [noteText, setNoteText] = useState('');
-  const [notePosting, setNotePosting] = useState(false);
-  const [noteJustSentFor, setNoteJustSentFor] = useState<number | null>(null);
-
-  // Reset search + close any open note editor when navigating between steps.
-  // Each step has its own scope of "what you're searching for."
-  useEffect(() => { setSearch(''); setNoteOpenFor(null); setNoteText(''); }, [step]);
+  const [createContent, setCreateContent] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const fetched = useRef(false);
 
   const fetchProjects = useCallback(() => {
     setLoading(true); setError(null);
-    window.zenstate.bcListProjects().then((res) => {
-      if (res.ok && res.data) setProjects(res.data);
-      else setError(res.error ?? 'Failed to load projects');
-      setLoading(false);
-    });
+    zs.bcListProjects()
+      .then((res) => { if (res.ok) setProjects(res.data); else setError(res.error); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
-  const goToProjects = () => { setStep('projects'); if (projects.length === 0) fetchProjects(); };
+  useEffect(() => {
+    if (fetched.current) return;
+    fetched.current = true;
+    fetchProjects();
+  }, [fetchProjects]);
+
+  useEffect(() => { setSearch(''); }, [step]);
+
   const goToLists = (p: BasecampProject) => {
     setProject(p); setStep('lists'); setLists([]); setLoading(true); setError(null);
     if (!p.todoSetId) { setError('Project has no to-do set'); setLoading(false); return; }
-    window.zenstate.bcListTodoLists(p.id, p.todoSetId).then((res) => {
-      if (res.ok && res.data) setLists(res.data);
-      else setError(res.error ?? 'Failed to load lists');
-      setLoading(false);
-    });
+    zs.bcListTodoLists(p.id, p.todoSetId)
+      .then((res) => { if (res.ok) setLists(res.data); else setError(res.error); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   };
+
   const goToTodos = (l: BasecampTodoList) => {
     if (!project) return;
     setList(l); setStep('todos'); setTodos([]); setLoading(true); setError(null);
-    window.zenstate.bcListTodos(project.id, l.id).then((res) => {
-      if (res.ok && res.data) setTodos(res.data);
-      else setError(res.error ?? 'Failed to load to-dos');
-      setLoading(false);
-    });
+    zs.bcListTodos(project.id, l.id)
+      .then((res) => { if (res.ok) setTodos(res.data); else setError(res.error); })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   };
 
-  const pickRecent = (r: RecentTodo) => {
-    onPin({
-      todoId: r.todoId, projectId: r.projectId, todoListId: r.todoListId, accountId: r.accountId,
-      content: r.content, projectName: r.projectName,
-    });
+  const goBack = () => {
+    if (step === 'todos') setStep('lists');
+    else if (step === 'lists') setStep('projects');
   };
 
-  const pickTodo = (t: BasecampTodo) => {
-    if (!project || !list || !authState.account) return;
-    onPin({
-      todoId: t.id, projectId: project.id, todoListId: list.id, accountId: authState.account.id,
-      content: t.content, projectName: project.name,
-    });
+  const handleCreateInBrowse = async () => {
+    if (!project || !list || !createContent.trim() || creating) return;
+    setCreating(true); setCreateError(null);
+    try {
+      const res = await zs.bcCreateTodo({ projectId: project.id, todoListId: list.id, content: createContent.trim() });
+      if (!res.ok) { setCreateError(res.error); setCreating(false); return; }
+      const todo = res.data;
+      setTodos((prev) => [...prev, todo]);
+      const item: PinnedTodo = { todoId: todo.id, projectId: project.id, todoListId: list.id, accountId, content: todo.content, projectName: project.name };
+      onRowClick(item);
+      setCreateContent('');
+    } catch (e) {
+      setCreateError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
   };
 
-  // Filter recents by search
-  const filteredRecents = useMemo(() =>
-    recents.filter((r) => !alreadyPinned.has(r.todoId))
-           .filter((r) => !search || r.content.toLowerCase().includes(search.toLowerCase()) || r.projectName.toLowerCase().includes(search.toLowerCase())),
-  [recents, alreadyPinned, search]);
+  const filteredProjects = search ? projects.filter((p) => p.name.toLowerCase().includes(search.toLowerCase())) : projects;
+  const filteredLists = search ? lists.filter((l) => l.title.toLowerCase().includes(search.toLowerCase())) : lists;
+  const filteredTodos = (search ? todos.filter((t) => t.content.toLowerCase().includes(search.toLowerCase())) : todos).filter((t) => !alreadyPinned.has(t.id));
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ width: 480 }}>
-        {/* Header with breadcrumb */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-3)' }}>
-          {step !== 'recents' && (
-            <button
-              onClick={() => {
-                if (step === 'todos') setStep('lists');
-                else if (step === 'lists') setStep('projects');
-                else if (step === 'projects') setStep('recents');
-              }}
-              style={{ background: 'transparent', border: 'none', color: 'var(--zen-secondary-text)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', borderRadius: 4 }}
-              onMouseEnter={(e) => e.currentTarget.style.color = 'var(--zen-text)'}
-              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--zen-secondary-text)'}
-            >
-              <ArrowLeft size={16} />
-            </button>
-          )}
-          <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, margin: 0, flex: 1, letterSpacing: '-0.01em' }}>
-            {step === 'recents' && (title ?? 'Pin a to-do')}
-            {step === 'projects' && 'Pick a project'}
-            {step === 'lists' && project?.name}
-            {step === 'todos' && list?.title}
-          </h3>
-          <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--zen-tertiary-text)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', borderRadius: 4 }}>
-            <X size={16} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {step !== 'projects' && (
+          <button
+            onClick={goBack}
+            style={{ background: 'transparent', border: 'none', color: 'var(--zen-secondary-text)', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center', borderRadius: 4 }}
+          >
+            <ArrowLeft size={14} />
           </button>
-        </div>
-
-        {/* Search — present on every step. Scope is whatever's visible:
-            recents step searches recents, projects step searches projects, etc. */}
-        <div style={{ position: 'relative', marginBottom: 'var(--space-3)' }}>
-          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--zen-tertiary-text)' }} />
-          <input
-            className="text-input"
-            placeholder={
-              step === 'recents' ? 'Search recently used to-dos…'
-                : step === 'projects' ? 'Search projects…'
-                : step === 'lists' ? 'Search to-do lists…'
-                : 'Search to-dos…'
-            }
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: 30 }}
-          />
-        </div>
-
-        {/* Body */}
-        <div style={{ maxHeight: 380, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {error && <div style={{ color: 'var(--status-focused)', fontSize: 'var(--text-sm)', padding: 'var(--space-2)' }}>{error}</div>}
-
-          {step === 'recents' && (
-            <>
-              {filteredRecents.length === 0 ? (
-                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)', textAlign: 'center' }}>
-                  {search ? 'No matching recent to-dos.' : 'Recently-used to-dos appear here.'}
-                </div>
-              ) : (
-                filteredRecents.map((r) => (
-                  <PickerRow key={r.todoId} title={r.content} subtitle={r.projectName} onClick={() => pickRecent(r)} />
-                ))
-              )}
-              <button
-                onClick={goToProjects}
-                style={{
-                  marginTop: 'var(--space-3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  gap: 'var(--space-2)',
-                  padding: '10px var(--space-3)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--zen-tertiary-bg)',
-                  border: '1px solid var(--zen-divider)',
-                  color: 'var(--zen-text)',
-                  fontSize: 'var(--text-sm)', fontWeight: 500,
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                <Briefcase size={14} /> Browse all projects
-              </button>
-            </>
-          )}
-
-          {step === 'projects' && (loading
-            ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)' }}>Loading projects…</div>
-            : (() => {
-                const filtered = search
-                  ? projects.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()) || (p.description ?? '').toLowerCase().includes(search.toLowerCase()))
-                  : projects;
-                if (filtered.length === 0) {
-                  return <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)', textAlign: 'center' }}>No projects match.</div>;
-                }
-                return filtered.map((p) => <PickerRow key={p.id} title={p.name} subtitle={p.description ?? undefined} onClick={() => goToLists(p)} />);
-              })()
-          )}
-
-          {step === 'lists' && (loading
-            ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)' }}>Loading to-do lists…</div>
-            : (() => {
-                const filtered = search
-                  ? lists.filter((l) => l.title.toLowerCase().includes(search.toLowerCase()) || (l.description ?? '').toLowerCase().includes(search.toLowerCase()))
-                  : lists;
-                if (filtered.length === 0) {
-                  return <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)', textAlign: 'center' }}>No lists match.</div>;
-                }
-                return filtered.map((l) => <PickerRow key={l.id} title={l.title} subtitle={l.description ?? undefined} onClick={() => goToTodos(l)} />);
-              })()
-          )}
-
-          {step === 'todos' && (loading
-            ? <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)' }}>Loading to-dos…</div>
-            : (() => {
-                const filtered = (search
-                  ? todos.filter((t) => t.content.toLowerCase().includes(search.toLowerCase()))
-                  : todos
-                ).filter((t) => !alreadyPinned.has(t.id));
-                if (filtered.length === 0) {
-                  return <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-tertiary-text)', padding: 'var(--space-3)', textAlign: 'center' }}>
-                    {search ? 'No to-dos match.' : 'No to-dos in this list.'}
-                  </div>;
-                }
-                return filtered.map((t) => (
-                  <PickerTodoRow
-                    key={t.id}
-                    todo={t}
-                    onPin={() => pickTodo(t)}
-                    isNoteOpen={noteOpenFor === t.id}
-                    onToggleNote={() => {
-                      if (noteOpenFor === t.id) { setNoteOpenFor(null); setNoteText(''); }
-                      else { setNoteOpenFor(t.id); setNoteText(''); }
-                    }}
-                    noteText={noteText}
-                    onNoteTextChange={setNoteText}
-                    notePosting={notePosting && noteOpenFor === t.id}
-                    noteJustSent={noteJustSentFor === t.id}
-                    onNoteSubmit={async () => {
-                      if (!project || !noteText.trim() || notePosting) return;
-                      setNotePosting(true);
-                      const res = await window.zenstate.bcPostComment({
-                        projectId: project.id, todoId: t.id, content: noteText.trim(),
-                      }).catch((e) => ({ ok: false as const, error: (e as Error).message }));
-                      setNotePosting(false);
-                      if (res.ok) {
-                        setNoteJustSentFor(t.id);
-                        setNoteText('');
-                        setTimeout(() => {
-                          setNoteOpenFor(null);
-                          setNoteJustSentFor(null);
-                        }, 1100);
-                      }
-                    }}
-                  />
-                ));
-              })()
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Todo row with two actions: Pin (primary) and Note (secondary, expands inline).
-// Mirrors the popover Projects view's per-todo affordances so users can
-// optionally jot a note before pinning without leaving the picker.
-interface PickerTodoRowProps {
-  todo: BasecampTodo;
-  onPin: () => void;
-  isNoteOpen: boolean;
-  onToggleNote: () => void;
-  noteText: string;
-  onNoteTextChange: (s: string) => void;
-  onNoteSubmit: () => void;
-  notePosting: boolean;
-  noteJustSent: boolean;
-}
-
-function PickerTodoRow({ todo, onPin, isNoteOpen, onToggleNote, noteText, onNoteTextChange, onNoteSubmit, notePosting, noteJustSent }: PickerTodoRowProps) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        borderRadius: 'var(--radius-sm)',
-        background: isNoteOpen ? 'var(--zen-secondary-bg)' : 'transparent',
-        border: `1px solid ${isNoteOpen ? 'var(--zen-divider)' : 'transparent'}`,
-        transition: 'background var(--duration-quick) var(--ease-standard), border-color var(--duration-quick) var(--ease-standard)',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px var(--space-3)' }}>
-        {/* Read-only checkbox so completed todos look completed */}
-        <div style={{
-          width: 13, height: 13, borderRadius: 3, border: '1.5px solid var(--zen-divider)',
-          flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: todo.completed ? 'var(--zen-primary)' : 'transparent',
-        }}>
-          {todo.completed && <span style={{ fontSize: 9, color: 'white', lineHeight: 1 }}>✓</span>}
-        </div>
-
-        {/* Title (click-through to pin) */}
-        <button
-          onClick={onPin}
-          style={{
-            flex: 1, minWidth: 0, textAlign: 'left',
-            background: 'transparent', border: 'none', cursor: 'pointer',
-            color: todo.completed ? 'var(--zen-tertiary-text)' : 'var(--zen-text)',
-            textDecoration: todo.completed ? 'line-through' : 'none',
-            fontFamily: 'inherit',
-            fontSize: 'var(--text-base)',
-            padding: 0,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}
-          title={todo.completed ? 'Pin completed to-do' : 'Pin to today'}
-        >
-          {todo.content}
-        </button>
-
-        {/* Hover actions: Pin + Note */}
-        {(hovered || isNoteOpen) && (
-          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-            <button
-              onClick={onToggleNote}
-              title={isNoteOpen ? 'Close note' : 'Add a note to this to-do'}
-              style={{
-                background: isNoteOpen ? 'rgba(10, 132, 255, 0.16)' : 'transparent',
-                border: 'none', cursor: 'pointer', padding: 5, borderRadius: 4,
-                color: isNoteOpen ? 'var(--zen-primary)' : 'var(--zen-secondary-text)',
-                display: 'flex', alignItems: 'center',
-              }}
-            >
-              <MessageSquare size={12} />
-            </button>
-            <button
-              onClick={onPin}
-              title="Pin to today"
-              className="btn btn-primary"
-              style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-            >
-              <Plus size={11} /> Pin
-            </button>
-          </div>
         )}
+        <span style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)' }}>
+          {step === 'projects' && 'Projects'}
+          {step === 'lists' && project?.name}
+          {step === 'todos' && `${project?.name ?? ''} · ${list?.title ?? ''}`}
+        </span>
       </div>
 
-      {/* Inline note editor */}
-      {isNoteOpen && (
-        <div style={{ padding: '0 var(--space-3) 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <textarea
-            autoFocus
-            rows={2}
-            placeholder="Add a comment to this Basecamp to-do…"
-            value={noteText}
-            onChange={(e) => onNoteTextChange(e.target.value)}
-            className="text-input"
-            style={{ resize: 'none', fontSize: 'var(--text-sm)', fontFamily: 'inherit', lineHeight: 1.4 }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) onNoteSubmit();
-            }}
-          />
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
-            {noteJustSent && (
-              <span style={{ fontSize: 11, color: 'var(--status-available)' }}>✓ Posted</span>
-            )}
+      <div style={{ position: 'relative' }}>
+        <Search size={12} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--zen-tertiary-text)', pointerEvents: 'none' }} />
+        <input
+          className="text-input"
+          placeholder={step === 'projects' ? 'Search projects…' : step === 'lists' ? 'Search lists…' : 'Search to-dos…'}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ paddingLeft: 28, fontSize: 'var(--text-sm)' }}
+        />
+      </div>
+
+      {loading && <TabLoading label={`Loading ${step}…`} />}
+      {error && <TabError message={error} onRetry={step === 'projects' ? fetchProjects : () => {}} />}
+
+      {!loading && !error && step === 'projects' && (
+        filteredProjects.length === 0
+          ? <TabEmpty label="No projects match." />
+          : filteredProjects.map((p) => (
+              <BrowseRow key={p.id} title={p.name} subtitle={p.description} onClick={() => goToLists(p)} />
+            ))
+      )}
+
+      {!loading && !error && step === 'lists' && (
+        filteredLists.length === 0
+          ? <TabEmpty label="No lists match." />
+          : filteredLists.map((l) => (
+              <BrowseRow key={l.id} title={l.title} subtitle={l.description} onClick={() => goToTodos(l)} />
+            ))
+      )}
+
+      {!loading && !error && step === 'todos' && (
+        <>
+          {filteredTodos.length === 0 && <TabEmpty label={search ? 'No to-dos match.' : 'No to-dos in this list.'} />}
+          {filteredTodos.map((t) => {
+            const item: PinnedTodo | null = (project && list)
+              ? { todoId: t.id, projectId: project.id, todoListId: list.id, accountId, content: t.content, projectName: project.name }
+              : null;
+            return (
+              <SelectableRow
+                key={t.id} todoId={t.id} title={t.content}
+                subtitle={`${project?.name ?? ''}${list ? ` · ${list.title}` : ''}`}
+                checked={pending.has(t.id)} disabled={!item}
+                onClick={() => item && onRowClick(item)}
+              />
+            );
+          })}
+          <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+            <input
+              className="text-input"
+              placeholder="New to-do…"
+              value={createContent}
+              onChange={(e) => setCreateContent(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreateInBrowse(); }}
+              style={{ flex: 1, fontSize: 'var(--text-sm)' }}
+            />
             <button
-              onClick={onNoteSubmit}
-              disabled={!noteText.trim() || notePosting}
-              className="btn btn-secondary"
-              style={{ padding: '4px 10px', fontSize: 11 }}
+              className="btn btn-primary"
+              disabled={!createContent.trim() || creating}
+              onClick={handleCreateInBrowse}
+              style={{ padding: '6px 12px', fontSize: 'var(--text-sm)', whiteSpace: 'nowrap' }}
             >
-              {notePosting ? 'Posting…' : 'Post note'}
+              {creating ? '…' : 'Create'}
             </button>
           </div>
-        </div>
+          {createError && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--status-focused)' }}>{createError}</span>}
+        </>
       )}
     </div>
   );
 }
 
-function PickerRow({ title, subtitle, onClick }: { title: string; subtitle?: string; onClick: () => void }) {
+function BrowseRow({ title, subtitle, onClick }: { title: string; subtitle?: string; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
   return (
     <button
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        display: 'block', width: '100%', textAlign: 'left',
-        padding: '10px var(--space-3)', borderRadius: 'var(--radius-sm)',
-        background: 'transparent', border: 'none', cursor: 'pointer',
-        color: 'var(--zen-text)', fontFamily: 'inherit',
+        display: 'flex', alignItems: 'center', width: '100%', textAlign: 'left',
+        padding: '9px 10px', borderRadius: 'var(--radius-sm)',
+        background: hovered ? 'var(--zen-hover)' : 'transparent', border: 'none',
+        cursor: 'pointer', fontFamily: 'inherit', gap: 8,
         transition: 'background var(--duration-quick) var(--ease-standard)',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
-      <div style={{ fontSize: 'var(--text-base)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
-      {subtitle && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</div>}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 'var(--text-base)', color: 'var(--zen-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 'var(--text-xs)', color: 'var(--zen-tertiary-text)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</div>}
+      </div>
+      <ChevronDown size={12} style={{ color: 'var(--zen-tertiary-text)', flexShrink: 0, transform: 'rotate(-90deg)' }} />
     </button>
   );
 }

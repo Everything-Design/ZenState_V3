@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { DailySession, BasecampProject, BasecampTodoList, BasecampTodo, BasecampAuthState } from '../../shared/types';
+import React, { useState, useEffect } from 'react';
+import { DailySession, PinnedTodo, BasecampAuthState, RecentTodo } from '../../shared/types';
+import { PinPicker } from '../views/dashboard/TodayTab';
 
 type BasecampLink = NonNullable<DailySession['basecamp']>;
 
@@ -21,67 +22,28 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
   //  - `null` meaning the user explicitly unlinked
   //  - a new BasecampLink the user just picked
   const [linkState, setLinkState] = useState<BasecampLink | null | undefined>(session.basecamp);
+  // Human-readable summary for the current link (project / todo title).
+  const [linkDisplayName, setLinkDisplayName] = useState<string | null>(
+    session.basecamp ? `Linked Basecamp to-do (#${session.basecamp.todoId})` : null
+  );
   const [showPicker, setShowPicker] = useState(false);
-
-  // Auth + cascade data
   const [authState, setAuthState] = useState<BasecampAuthState | null>(null);
-  const [projects, setProjects] = useState<BasecampProject[]>([]);
-  const [lists, setLists] = useState<BasecampTodoList[]>([]);
-  const [todos, setTodos] = useState<BasecampTodo[]>([]);
-  const [pickerProjectId, setPickerProjectId] = useState<number | undefined>(linkState?.projectId);
-  const [pickerListId, setPickerListId] = useState<number | undefined>(linkState?.todoListId);
-  const [loadingProjects, setLoadingProjects] = useState(false);
-  const [loadingLists, setLoadingLists] = useState(false);
-  const [loadingTodos, setLoadingTodos] = useState(false);
 
   useEffect(() => {
     window.zenstate.bcGetAuthState().then(setAuthState).catch(() => {});
   }, []);
 
-  // Lazy-load projects when the picker opens
-  useEffect(() => {
-    if (showPicker && projects.length === 0 && authState?.isConnected) {
-      setLoadingProjects(true);
-      window.zenstate.bcListProjects().then((res) => {
-        if (res.ok && res.data) setProjects(res.data);
-      }).finally(() => setLoadingProjects(false));
-    }
-  }, [showPicker, authState, projects.length]);
-
-  // Load lists when a project is selected in the picker
-  useEffect(() => {
-    if (!pickerProjectId || !showPicker) return;
-    const project = projects.find((p) => p.id === pickerProjectId);
-    if (!project?.todoSetId) return;
-    setLoadingLists(true);
-    setLists([]);
-    setTodos([]);
-    window.zenstate.bcListTodoLists(pickerProjectId, project.todoSetId).then((res) => {
-      if (res.ok && res.data) setLists(res.data);
-    }).finally(() => setLoadingLists(false));
-  }, [pickerProjectId, projects, showPicker]);
-
-  // Load todos when a list is selected
-  useEffect(() => {
-    if (!pickerListId || !pickerProjectId || !showPicker) return;
-    setLoadingTodos(true);
-    setTodos([]);
-    window.zenstate.bcListTodos(pickerProjectId, pickerListId).then((res) => {
-      if (res.ok && res.data) setTodos(res.data);
-    }).finally(() => setLoadingTodos(false));
-  }, [pickerListId, pickerProjectId, showPicker]);
-
-  const handlePickTodo = useCallback((todo: BasecampTodo) => {
-    if (!authState?.account || !pickerProjectId || !pickerListId) return;
+  const handlePicked = (item: PinnedTodo) => {
     setLinkState({
-      accountId: authState.account.id,
-      projectId: pickerProjectId,
-      todoId: todo.id,
-      todoListId: pickerListId,
-      synced: false, // marked unsynced so the next backfill picks it up
+      accountId: item.accountId,
+      projectId: item.projectId,
+      todoId: item.todoId,
+      todoListId: item.todoListId,
+      synced: false,
     });
+    setLinkDisplayName(`${item.projectName} / ${item.content}`);
     setShowPicker(false);
-  }, [authState, pickerProjectId, pickerListId]);
+  };
 
   function handleSave() {
     if (!taskLabel.trim()) return;
@@ -97,16 +59,8 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
     });
   }
 
-  // Render the current link as a readable summary
-  const linkedTodo = linkState ? todos.find((t) => t.id === linkState.todoId) : undefined;
-  const linkedProject = linkState ? projects.find((p) => p.id === linkState.projectId) : undefined;
-  const linkSummary = linkState
-    ? (linkedTodo && linkedProject
-      ? `${linkedProject.name} / ${linkedTodo.content}`
-      : `Linked Basecamp to-do (#${linkState.todoId})`)
-    : null;
-
   return (
+    <>
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Edit Session</div>
@@ -133,27 +87,27 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
             <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', padding: '6px 8px' }}>
               Connect Basecamp in Settings to link this session to a to-do.
             </div>
-          ) : linkState && !showPicker ? (
+          ) : linkState ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', background: 'var(--zen-tertiary-bg)', borderRadius: 6 }}>
               <span style={{ fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--zen-text)' }}>
-                {linkSummary}
+                {linkDisplayName ?? `Linked Basecamp to-do (#${linkState.todoId})`}
               </span>
               <button
                 className="footer-btn"
-                onClick={() => { setShowPicker(true); }}
+                onClick={() => setShowPicker(true)}
                 style={{ fontSize: 10 }}
               >
                 Change
               </button>
               <button
                 className="footer-btn"
-                onClick={() => { setLinkState(null); setShowPicker(false); }}
+                onClick={() => { setLinkState(null); setLinkDisplayName(null); }}
                 style={{ fontSize: 10, color: 'var(--status-focused)' }}
               >
                 Unlink
               </button>
             </div>
-          ) : !showPicker ? (
+          ) : (
             <button
               className="btn btn-secondary"
               style={{ width: '100%', fontSize: 12 }}
@@ -161,70 +115,11 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
             >
               + Link to a Basecamp to-do
             </button>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'var(--zen-tertiary-bg)', borderRadius: 6 }}>
-              <select
-                className="text-input"
-                value={pickerProjectId ?? ''}
-                onChange={(e) => { setPickerProjectId(Number(e.target.value) || undefined); setPickerListId(undefined); }}
-                style={{ fontSize: 12 }}
-                disabled={loadingProjects}
-              >
-                <option value="">{loadingProjects ? 'Loading projects…' : 'Pick a project…'}</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-
-              {pickerProjectId && (
-                <select
-                  className="text-input"
-                  value={pickerListId ?? ''}
-                  onChange={(e) => setPickerListId(Number(e.target.value) || undefined)}
-                  style={{ fontSize: 12 }}
-                  disabled={loadingLists}
-                >
-                  <option value="">{loadingLists ? 'Loading lists…' : 'Pick a to-do list…'}</option>
-                  {lists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
-                </select>
-              )}
-
-              {pickerListId && (
-                <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--zen-divider)', borderRadius: 6, padding: 4 }}>
-                  {loadingTodos && <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', padding: 6 }}>Loading to-dos…</div>}
-                  {!loadingTodos && todos.length === 0 && <div style={{ fontSize: 11, color: 'var(--zen-tertiary-text)', padding: 6 }}>No to-dos in this list.</div>}
-                  {todos.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => handlePickTodo(t)}
-                      style={{
-                        display: 'block', width: '100%', textAlign: 'left',
-                        padding: '6px 8px', borderRadius: 4, fontSize: 12,
-                        background: 'transparent', border: 'none', cursor: 'pointer',
-                        color: 'var(--zen-text)', fontFamily: 'inherit',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--zen-hover)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      {t.content}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <button
-                className="footer-btn"
-                style={{ alignSelf: 'flex-end', fontSize: 10 }}
-                onClick={() => setShowPicker(false)}
-              >
-                Cancel picker
-              </button>
-            </div>
           )}
         </div>
 
-        {/* Duration — direct numeric input. Tap-and-stepper buttons were
-            slow for the common case (typing a different value). The inputs
-            clamp on blur so out-of-range values silently snap into bounds
-            instead of throwing an error. */}
+        {/* Duration — direct numeric input. The inputs clamp on blur so
+            out-of-range values silently snap into bounds. */}
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 11, color: 'var(--zen-secondary-text)', display: 'block', marginBottom: 4 }}>
             Duration
@@ -288,5 +183,25 @@ export default function SessionEditModal({ session, date, onSave, onClose }: Pro
         </div>
       </div>
     </div>
+
+    {/* PinPicker — single-select mode. Clicking a row immediately picks it,
+        fires handlePicked with the full PinnedTodo, and closes. The Save
+        button then passes the new basecamp link to the caller; main process
+        handles delete + recreate for re-parenting (no extra prompt needed).
+        Rendered outside the modal-overlay so its own overlay doesn't nest. */}
+    {showPicker && authState?.isConnected && authState.account && (
+      <PinPicker
+        open={showPicker}
+        mode="single"
+        target="today"
+        recents={[] as RecentTodo[]}
+        alreadyPinned={new Set<number>()}
+        accountId={authState.account.id}
+        onPickedItem={handlePicked}
+        onClose={() => setShowPicker(false)}
+        title="Link to a Basecamp to-do"
+      />
+    )}
+    </>
   );
 }

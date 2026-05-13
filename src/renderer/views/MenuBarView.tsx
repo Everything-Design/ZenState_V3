@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass, Briefcase, Play, Megaphone, X } from 'lucide-react';
+import { Settings, Timer, LayoutDashboard, MessageCircle, Hourglass, Pin, Play, Megaphone, X } from 'lucide-react';
 import { User, AvailabilityStatus, IPC, LicenseState, TodayPlan, PinnedTodo, ReceivedPing } from '../../shared/types';
 import SendPingSheet from '../components/SendPingSheet';
 
@@ -39,7 +39,6 @@ interface Props {
   onStatusChange: (status: AvailabilityStatus) => void;
   onUserUpdate: (updates: Partial<User>) => void;
   onOpenSettings?: () => void;
-  onOpenProjects?: () => void;
 }
 
 function formatTime(seconds: number): string {
@@ -91,7 +90,7 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings, onOpenProjects }: Props) {
+export default function MenuBarView({ currentUser, peers, timerState, statusRevertRemaining, isPro, onStatusChange, onUserUpdate, onOpenSettings }: Props) {
   const [searchText, setSearchText] = useState('');
   const [showStatusMessage, setShowStatusMessage] = useState(false);
   const [statusMessageInput, setStatusMessageInput] = useState('');
@@ -621,7 +620,7 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
         </div>
       ) : (
         <div style={{ padding: '24px 16px', textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-          <Briefcase size={20} style={{ color: 'var(--zen-tertiary-text)' }} />
+          <Pin size={20} style={{ color: 'var(--zen-tertiary-text)' }} />
           <div style={{ fontSize: 'var(--text-sm)', color: 'var(--zen-secondary-text)', lineHeight: 'var(--leading-relaxed)', maxWidth: 240 }}>
             No to-dos pinned for today.<br />Plan your day in the Dashboard.
           </div>
@@ -840,11 +839,13 @@ export default function MenuBarView({ currentUser, peers, timerState, statusReve
           <button className="footer-icon-btn" onClick={() => window.zenstate.openDashboard('settings')} title="Settings">
             <Settings size={15} />
           </button>
-          {onOpenProjects && (
-            <button className="footer-icon-btn" onClick={onOpenProjects} title="Projects">
-              <Briefcase size={15} />
-            </button>
-          )}
+          <button
+            className="footer-icon-btn"
+            onClick={() => { window.zenstate.openDashboardAndPin(); window.zenstate.closePopover(); }}
+            title="Pin another to-do"
+          >
+            <Pin size={15} />
+          </button>
           <button className="footer-icon-btn" onClick={() => setShowPingSheet(true)} title="Send a quick heads-up to teammates">
             <Megaphone size={15} />
           </button>

@@ -1,5 +1,14 @@
 import { BasecampOAuth, BC_USER_AGENT } from './oauth';
-import { BasecampProject, BasecampTodoList, BasecampTodo, BasecampTimesheetEntry } from '../../../shared/types';
+import {
+  BasecampProject,
+  BasecampTodoList,
+  BasecampTodo,
+  BasecampTimesheetEntry,
+  MyAssignment,
+  MyAssignmentsResponse,
+  MyAssignmentsDueScope,
+  TodoSearchResult,
+} from '../../../shared/types';
 
 interface RawProject {
   id: number;
@@ -45,8 +54,43 @@ interface RawTodo {
   assignees: Array<{ id: number }>;
 }
 
+// Shape returned by /my/assignments.json — same item shape used for both
+// `priorities` and `non_priorities` buckets in the response.
+interface RawMyAssignment {
+  id: number;
+  type: string;            // "Todo" (we filter the rest)
+  title?: string;          // sometimes the API returns `title` for non-Todo recordings
+  content?: string;        // todos use `content`
+  url: string;
+  app_url: string;
+  due_on?: string;
+  bucket: { id: number; name: string; type: string };
+  parent?: { id: number; title: string; type: string };
+  assignees?: Array<{ id: number; name: string }>;
+}
+
+interface RawMyAssignmentsResponse {
+  priorities: RawMyAssignment[];
+  non_priorities: RawMyAssignment[];
+}
+
+interface RawSearchHit {
+  id: number;
+  type: string;
+  title: string;
+  excerpt?: string;
+  url: string;
+  app_url: string;
+  bucket: { id: number; name: string; type: string };
+  parent?: { id: number; title: string; type: string };
+  created_at: string;
+}
+
 const MAX_AUTH_RETRIES = 1;
 const MAX_RATE_LIMIT_RETRIES = 3;
+// Cap how long we'll honour a Retry-After header. Basecamp can return arbitrary
+// values; we don't want a single IPC handler to hold open for an hour.
+const MAX_RATE_LIMIT_WAIT_SEC = 60;
 
 export class BasecampApi {
   constructor(private readonly oauth: BasecampOAuth) {}
@@ -74,8 +118,9 @@ export class BasecampApi {
     }
 
     if (res.status === 429 && rateRetries > 0) {
-      const retryAfter = parseInt(res.headers.get('Retry-After') ?? '5', 10);
-      await new Promise((r) => setTimeout(r, Math.max(1, retryAfter) * 1000));
+      const headerValue = parseInt(res.headers.get('Retry-After') ?? '5', 10);
+      const waitSec = Math.min(MAX_RATE_LIMIT_WAIT_SEC, Math.max(1, isFinite(headerValue) ? headerValue : 5));
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
       return this.fetchAuth(url, init, { authRetries, rateRetries: rateRetries - 1 });
     }
 
@@ -194,6 +239,95 @@ export class BasecampApi {
   async getProjectTimesheet(projectId: number): Promise<BasecampTimesheetEntry[]> {
     const raw = await this.paginate<RawTimesheetEntry>(`${this.accountBase()}/projects/${projectId}/timesheet.json`);
     return raw.map((r) => this.mapTimesheetEntry(r));
+  }
+
+  // Update an existing Basecamp timesheet entry. Uses the flat route — note
+  // that `recording_id` (parent) is immutable here; re-parenting requires
+  // delete + create. Only the fields supplied are touched.
+  async updateTimesheetEntry(entryId: number, fields: {
+    date?: string;
+    hours?: string;
+    description?: string;
+    personId?: number;
+  }): Promise<BasecampTimesheetEntry> {
+    const body: Record<string, unknown> = {};
+    if (fields.date !== undefined) body.date = fields.date;
+    if (fields.hours !== undefined) body.hours = fields.hours;
+    if (fields.description !== undefined) body.description = fields.description;
+    if (fields.personId !== undefined) body.person_id = fields.personId;
+
+    const raw = await this.requestJson<RawTimesheetEntry>(
+      `${this.accountBase()}/timesheet_entries/${entryId}.json`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    );
+    return this.mapTimesheetEntry(raw);
+  }
+
+  // Permanently delete a timesheet entry (Basecamp does not trash these; gone is gone).
+  async deleteTimesheetEntry(entryId: number): Promise<void> {
+    await this.requestJson<void>(
+      `${this.accountBase()}/timesheet_entries/${entryId}.json`,
+      { method: 'DELETE' },
+    );
+  }
+
+  // Fetch todos assigned to the authenticated user across all projects, grouped
+  // into priorities and non-priorities. One request replaces the project → list
+  // → todo drill-down for the common "pin one of my todos" case.
+  async getMyAssignments(): Promise<MyAssignmentsResponse> {
+    const raw = await this.requestJson<RawMyAssignmentsResponse>(
+      `${this.accountBase()}/my/assignments.json`,
+    );
+    return {
+      priorities: (raw.priorities ?? [])
+        .filter((r) => r.type === 'Todo')
+        .map((r) => this.mapMyAssignment(r)),
+      nonPriorities: (raw.non_priorities ?? [])
+        .filter((r) => r.type === 'Todo')
+        .map((r) => this.mapMyAssignment(r)),
+    };
+  }
+
+  // Same shape as getMyAssignments, filtered to a due-date scope.
+  // Scopes: 'overdue' | 'due_today' | 'due_tomorrow' | 'due_later_this_week'
+  //         | 'due_next_week' | 'due_later'.
+  async getMyAssignmentsDue(scope: MyAssignmentsDueScope): Promise<MyAssignment[]> {
+    const url = `${this.accountBase()}/my/assignments/due.json?scope=${encodeURIComponent(scope)}`;
+    const raw = await this.paginate<RawMyAssignment>(url);
+    return raw.filter((r) => r.type === 'Todo').map((r) => this.mapMyAssignment(r));
+  }
+
+  // Full-text search across the authenticated user's account. We filter to
+  // Todo hits; results land in a flat list ordered by relevance.
+  async searchTodos(query: string): Promise<TodoSearchResult[]> {
+    const url = `${this.accountBase()}/search.json?q=${encodeURIComponent(query)}&type=Todo`;
+    const hits = await this.paginate<RawSearchHit>(url);
+    return hits.map((h) => ({
+      id: h.id,
+      type: h.type,
+      title: h.title,
+      excerpt: h.excerpt,
+      url: h.url,
+      appUrl: h.app_url,
+      bucket: h.bucket,
+      parent: h.parent,
+      createdAt: h.created_at,
+    }));
+  }
+
+  private mapMyAssignment(r: RawMyAssignment): MyAssignment {
+    return {
+      id: r.id,
+      // todos use `content`; the API occasionally returns `title` for older items
+      content: r.content ?? r.title ?? '',
+      type: r.type,
+      url: r.url,
+      appUrl: r.app_url,
+      dueOn: r.due_on,
+      bucket: r.bucket,
+      parent: r.parent,
+      assignees: r.assignees ?? [],
+    };
   }
 
   private mapTimesheetEntry(r: RawTimesheetEntry): BasecampTimesheetEntry {

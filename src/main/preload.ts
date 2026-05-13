@@ -74,11 +74,17 @@ const IPC = {
   BC_CREATE_TODO: 'basecamp:create-todo',
   BC_POST_COMMENT: 'basecamp:post-comment',
   BC_CREATE_TIME_ENTRY: 'basecamp:create-time-entry',
+  BC_UPDATE_TIME_ENTRY: 'basecamp:update-time-entry',
+  BC_DELETE_TIME_ENTRY: 'basecamp:delete-time-entry',
   BC_GET_PROJECT_TIMESHEET: 'basecamp:get-project-timesheet',
   BC_BACKFILL_TIMESHEET: 'basecamp:backfill-timesheet',
+  BC_GET_MY_ASSIGNMENTS: 'basecamp:get-my-assignments',
+  BC_GET_MY_ASSIGNMENTS_DUE: 'basecamp:get-my-assignments-due',
+  BC_SEARCH_TODOS: 'basecamp:search-todos',
   BC_AUTH_CHANGED: 'basecamp:auth-changed',
   TODAY_GET: 'today:get',
   TODAY_PIN: 'today:pin',
+  TODAY_PIN_MANY: 'today:pin-many',
   TODAY_UNPIN: 'today:unpin',
   TODAY_REORDER: 'today:reorder',
   TODAY_SET_ESTIMATE: 'today:set-estimate',
@@ -87,11 +93,13 @@ const IPC = {
   RECENTS_GET: 'recents:get',
   TOMORROW_GET: 'tomorrow:get',
   TOMORROW_PIN: 'tomorrow:pin',
+  TOMORROW_PIN_MANY: 'tomorrow:pin-many',
   TOMORROW_UNPIN: 'tomorrow:unpin',
   TOMORROW_REORDER: 'tomorrow:reorder',
   TOMORROW_SET_ESTIMATE: 'tomorrow:set-estimate',
   TOMORROW_TOGGLE_COMPLETE: 'tomorrow:toggle-complete',
   TOMORROW_CHANGED: 'tomorrow:changed',
+  ALERT_GET_DATA: 'alert:get-data',
 } as const;
 
 // Channels the renderer is allowed to subscribe to (and detach from). Any
@@ -119,6 +127,7 @@ const LISTEN_CHANNELS: string[] = [
   IPC.BC_AUTH_CHANGED,
   'basecamp:reauth-required',
   'basecamp:timesheet-updated',
+  'basecamp:timesheet-error',
   IPC.TODAY_CHANGED,
   IPC.TOMORROW_CHANGED,
   IPC.TEAM_PING_RECEIVED,
@@ -162,23 +171,35 @@ contextBridge.exposeInMainWorld('zenstate', {
   bcCreateTodo: (data: { projectId: number; todoListId: number; content: string; description?: string; parentId?: number }) => ipcRenderer.invoke(IPC.BC_CREATE_TODO, data),
   bcPostComment: (data: { projectId: number; todoId: number; content: string }) => ipcRenderer.invoke(IPC.BC_POST_COMMENT, data),
   bcCreateTimeEntry: (data: { todoId: number; date: string; hours: string; description?: string }) => ipcRenderer.invoke(IPC.BC_CREATE_TIME_ENTRY, data),
+  bcUpdateTimeEntry: (data: { entryId: number; date?: string; hours?: string; description?: string; personId?: number }) => ipcRenderer.invoke(IPC.BC_UPDATE_TIME_ENTRY, data),
+  bcDeleteTimeEntry: (entryId: number) => ipcRenderer.invoke(IPC.BC_DELETE_TIME_ENTRY, { entryId }),
   bcGetProjectTimesheet: (projectId: number) => ipcRenderer.invoke(IPC.BC_GET_PROJECT_TIMESHEET, { projectId }),
   bcBackfillTimesheet: () => ipcRenderer.invoke(IPC.BC_BACKFILL_TIMESHEET),
+  // v5.1.0 — new pin-UX endpoints
+  bcGetMyAssignments: () => ipcRenderer.invoke(IPC.BC_GET_MY_ASSIGNMENTS),
+  bcGetMyAssignmentsDue: (scope: string) => ipcRenderer.invoke(IPC.BC_GET_MY_ASSIGNMENTS_DUE, { scope }),
+  bcSearchTodos: (query: string) => ipcRenderer.invoke(IPC.BC_SEARCH_TODOS, { query }),
 
   // Today + Recents
   todayGet: () => ipcRenderer.invoke(IPC.TODAY_GET),
   todayPin: (item: unknown) => ipcRenderer.invoke(IPC.TODAY_PIN, item),
+  todayPinMany: (items: unknown[]) => ipcRenderer.invoke(IPC.TODAY_PIN_MANY, items),
   todayUnpin: (todoId: number) => ipcRenderer.invoke(IPC.TODAY_UNPIN, todoId),
   todayReorder: (todoIds: number[]) => ipcRenderer.invoke(IPC.TODAY_REORDER, todoIds),
   todaySetEstimate: (todoId: number, minutes: number | null) => ipcRenderer.invoke(IPC.TODAY_SET_ESTIMATE, { todoId, minutes }),
   todayToggleComplete: (todoId: number) => ipcRenderer.invoke(IPC.TODAY_TOGGLE_COMPLETE, todoId),
   tomorrowGet: () => ipcRenderer.invoke(IPC.TOMORROW_GET),
   tomorrowPin: (item: unknown) => ipcRenderer.invoke(IPC.TOMORROW_PIN, item),
+  tomorrowPinMany: (items: unknown[]) => ipcRenderer.invoke(IPC.TOMORROW_PIN_MANY, items),
   tomorrowUnpin: (todoId: number) => ipcRenderer.invoke(IPC.TOMORROW_UNPIN, todoId),
   tomorrowReorder: (todoIds: number[]) => ipcRenderer.invoke(IPC.TOMORROW_REORDER, todoIds),
   tomorrowSetEstimate: (todoId: number, minutes: number | null) => ipcRenderer.invoke(IPC.TOMORROW_SET_ESTIMATE, { todoId, minutes }),
   tomorrowToggleComplete: (todoId: number) => ipcRenderer.invoke(IPC.TOMORROW_TOGGLE_COMPLETE, todoId),
   recentsGet: () => ipcRenderer.invoke(IPC.RECENTS_GET),
+
+  // v5.1.0 / B-3 — alert windows fetch their payload on mount instead of
+  // relying on the one-shot 'alert-data' broadcast (race-safe).
+  alertGetData: () => ipcRenderer.invoke(IPC.ALERT_GET_DATA),
 
   // Send (fire-and-forget)
   updateStatus: (status: string) => ipcRenderer.send(IPC.UPDATE_STATUS, status),

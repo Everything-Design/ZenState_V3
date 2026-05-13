@@ -13,3 +13,4 @@ scripts/keys/
 .swarm/
 ruvector.db
 ZenState_V3/
+.aider*

@@ -22,7 +22,7 @@ export default function LicenseActivationModal({ onClose, onActivated }: Props) 
         onActivated(state);
       }
     } catch (err) {
-      setResult({ isValid: false, isPro: false, payload: null, error: 'Failed to activate license' });
+      setResult({ isValid: false, isPro: false, isAdmin: false, payload: null, error: 'Failed to activate license' });
     } finally {
       setLoading(false);
     }

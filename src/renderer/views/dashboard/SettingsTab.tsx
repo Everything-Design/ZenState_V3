@@ -895,7 +895,7 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
               }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Share past sessions to Basecamp</div>
                 <div style={{ fontSize: 11, color: 'var(--zen-secondary-text)', lineHeight: 1.5, marginBottom: 10 }}>
-                  Optional — pushes your local sessions to Basecamp's timesheet, grouped by to-do and date. Only sessions you haven't already shared are included. Run this when you're ready to update your team.
+                  Optional — pushes your local sessions to Basecamp's timesheet, grouped by to-do and date. Only sessions you haven't already shared are included. Run this when you're ready to update your team. v5.1+: edits and deletes also auto-sync as you make them. Backfill is for retrying failures.
                 </div>
                 <button
                   className="btn btn-secondary"

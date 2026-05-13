@@ -28,8 +28,8 @@ declare global {
       login: (user: User) => void;
       signOut: () => void;
       getRecords: (month?: string) => Promise<DailyRecord[]>;
-      deleteSession: (sessionId: string, date: string) => Promise<boolean>;
-      updateSession: (sessionId: string, date: string, updates: unknown) => Promise<boolean>;
+      deleteSession: (sessionId: string, date: string) => Promise<{ ok: boolean; basecampDeleted: boolean; hadBasecampLink: boolean; error?: string }>;
+      updateSession: (sessionId: string, date: string, updates: unknown) => Promise<{ ok: boolean; basecampSynced: boolean; needsManualFix: boolean; error?: string }>;
       addSession: (data: { taskLabel: string; duration: number; startTime: string; notes?: string; basecamp?: { accountId: number; projectId: number; todoId: number; todoListId?: number } | null }) => Promise<{ ok: boolean; sessionId?: string; dateStr?: string; error?: string }>;
       getAppVersion: () => Promise<string>;
       resetAllData: () => Promise<boolean>;
@@ -87,6 +87,7 @@ declare global {
       tomorrowSetEstimate: (todoId: number, minutes: number | null) => Promise<TodayPlan>;
       tomorrowToggleComplete: (todoId: number) => Promise<TodayPlan>;
       recentsGet: () => Promise<RecentTodo[]>;
+      alertGetData: () => Promise<unknown>;
       // Returns an unsubscribe function — call it in useEffect cleanup to
       // detach just this listener (instead of nuking every listener on the
       // channel via removeAllListeners).
@@ -220,7 +221,7 @@ export default function DashboardApp() {
       }),
     ];
     return () => { offs.forEach((off) => off()); };
-  }, [currentUser]);
+  }, []);
 
   // Auto-refresh records when timer stops
   useEffect(() => {

@@ -111,11 +111,14 @@ export default function MiniTimerApp() {
 
   useEffect(() => {
     if (!expanded) return;
+    let cancelled = false;
     (window as any).zenstate.miniTimerGetNotes?.().then((n: string) => {
+      if (cancelled) return;
       // Only adopt main's value if the user hasn't started typing here yet.
       // Otherwise we'd clobber what they were writing.
       setNotes((prev) => (prev ? prev : (n ?? '')));
     }).catch(() => {});
+    return () => { cancelled = true; };
   }, [expanded]);
 
   const onNotesChange = useCallback((value: string) => {

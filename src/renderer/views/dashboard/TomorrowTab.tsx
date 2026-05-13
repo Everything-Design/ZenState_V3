@@ -59,10 +59,10 @@ export default function TomorrowTab({ onOpenSettings }: Props) {
     };
   }, []);
 
-  const handlePin = useCallback(async (item: PinnedTodo) => {
-    const next = await window.zenstate.tomorrowPin(item).catch(() => null);
+  const handlePinned = useCallback(async (_pinnedTodoIds: number[]) => {
+    // tomorrowPinMany already updated the store; re-fetch to reflect in UI.
+    const next = await window.zenstate.tomorrowGet().catch(() => null);
     if (next) setPlan(next);
-    setPickerOpen(false);
   }, []);
 
   const handleUnpin = useCallback(async (todoId: number) => {
@@ -156,13 +156,16 @@ export default function TomorrowTab({ onOpenSettings }: Props) {
         <span>At midnight, these items move to Today's plan. Anything you didn't finish today carries over with them.</span>
       </div>
 
-      {pickerOpen && authState?.isConnected && (
+      {pickerOpen && authState?.isConnected && authState.account && (
         <PinPicker
-          authState={authState}
+          open={pickerOpen}
+          mode="multi"
+          target="tomorrow"
           recents={recents}
           alreadyPinned={new Set(plan.items.map((i) => i.todoId))}
-          onPin={handlePin}
+          accountId={authState.account.id}
           onClose={() => setPickerOpen(false)}
+          onPinned={handlePinned}
           title="Pin to tomorrow"
         />
       )}

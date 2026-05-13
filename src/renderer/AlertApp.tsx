@@ -16,9 +16,15 @@ export default function AlertApp() {
   const [alertData, setAlertData] = useState<AlertData | null>(null);
 
   useEffect(() => {
-    return window.zenstate.on('alert-data', (data: unknown) => {
+    let eventArrived = false;
+    const off = window.zenstate.on('alert-data', (data: unknown) => {
+      eventArrived = true;
       setAlertData(data as AlertData);
     });
+    window.zenstate.alertGetData().then((cached: unknown) => {
+      if (!eventArrived && cached) setAlertData(cached as AlertData);
+    }).catch(() => {});
+    return off;
   }, []);
 
   if (!alertData) {

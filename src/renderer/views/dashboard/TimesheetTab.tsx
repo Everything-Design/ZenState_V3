@@ -3,6 +3,7 @@ import { Pencil, Trash2, FileText, Download, Plus } from 'lucide-react';
 import { DailyRecord, DailySession } from '../../../shared/types';
 import SessionEditModal from '../../components/SessionEditModal';
 import AddSessionModal from '../../components/AddSessionModal';
+import Toast, { useToast } from '../../components/Toast';
 // Plain neutral tag for legacy session.category data — no per-category colors anymore.
 const plainCategoryTagStyle: React.CSSProperties = {
   display: 'inline-block',
@@ -68,16 +69,42 @@ function formatDateLabel(dateStr: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
 }
 
+// IPC response shapes returned by main-process handlers (v5.1.0+)
+interface UpdateSessionResult {
+  ok: boolean;
+  basecampSynced: boolean;
+  needsManualFix: boolean;
+  error?: string;
+}
+
+interface DeleteSessionResult {
+  ok: boolean;
+  basecampDeleted: boolean;
+  hadBasecampLink: boolean;
+  error?: string;
+}
+
+function basecampEntryUrl(session: DailySession): string | undefined {
+  const bc = session.basecamp;
+  if (!bc) return undefined;
+  return `https://3.basecamp.com/${bc.accountId}/buckets/${bc.projectId}/todos/${bc.todoId}`;
+}
+
+function isLegacySession(session: DailySession): boolean {
+  return !!(session.basecamp?.synced === true && !session.basecamp?.entryId);
+}
+
 export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props) {
   const [statPeriod, setStatPeriod] = useState<StatPeriod>('today');
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [showCalendar, setShowCalendar] = useState(true);
   const [editingSession, setEditingSession] = useState<{ session: DailySession; date: string } | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ sessionId: string; session: DailySession } | null>(null);
   // "+ Add session" — log time the user spent without having started a timer.
   // Posts to Basecamp immediately for linked entries.
   const [addingSession, setAddingSession] = useState(false);
+  const { toasts, addToast, dismiss } = useToast();
 
   // Filter records by period
   const filteredRecords = useMemo(() => {
@@ -165,16 +192,37 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
     setCalendarMonth(next);
   }
 
-  async function handleDeleteSession(sessionId: string, date: string) {
-    await window.zenstate.deleteSession(sessionId, date);
+  async function handleDeleteSession(sessionId: string, date: string, session: DailySession) {
+    const res: DeleteSessionResult = await window.zenstate.deleteSession(sessionId, date);
     onRefreshRecords();
     setDeleteConfirm(null);
+
+    if (!res.ok) {
+      addToast('error', res.error ?? 'Failed to delete session.');
+    } else if (res.basecampDeleted) {
+      addToast('success', 'Deleted — also removed from Basecamp');
+    } else if (res.hadBasecampLink && !res.basecampDeleted) {
+      addToast('warning', 'Deleted locally. Basecamp entry could not be removed — remove it manually.', 'Open in Basecamp', basecampEntryUrl(session));
+    } else {
+      addToast('success', 'Deleted');
+    }
   }
 
   async function handleSaveEdit(sessionId: string, date: string, updates: { taskLabel: string; duration: number; notes: string; basecamp?: unknown }) {
-    await window.zenstate.updateSession(sessionId, date, updates);
+    const bcUrl = editingSession ? basecampEntryUrl(editingSession.session) : undefined;
+    const res: UpdateSessionResult = await window.zenstate.updateSession(sessionId, date, updates);
     onRefreshRecords();
     setEditingSession(null);
+
+    if (!res.ok) {
+      addToast('error', res.error ?? 'Failed to update session.');
+    } else if (res.basecampSynced) {
+      addToast('success', 'Updated — synced to Basecamp');
+    } else if (res.needsManualFix) {
+      addToast('warning', 'Updated locally. This session was created before v5.1 — also fix it in Basecamp', 'Open in Basecamp', bcUrl);
+    } else {
+      addToast('warning', 'Updated locally. Basecamp sync will retry later.');
+    }
   }
 
   function getActivityLevel(dateStr: string): number {
@@ -358,6 +406,26 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                       {session.category}
                     </span>
                   )}
+                  {isLegacySession(session) && (() => {
+                    const url = basecampEntryUrl(session);
+                    return (
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Session created before v5.1 — entryId not stored. Fix this entry in Basecamp manually."
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 2,
+                          fontSize: 9, fontWeight: 600, padding: '1px 5px',
+                          borderRadius: 4, background: 'rgba(255,149,0,0.15)',
+                          border: '1px solid #FF9500', color: '#FF9500',
+                          textDecoration: 'none', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Pre-v5.1 — sync via Basecamp
+                      </a>
+                    );
+                  })()}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 2 }}>
                   {session.startTime ? new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -386,23 +454,13 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                 >
                   <Pencil size={13} />
                 </button>
-                {deleteConfirm === session.id ? (
-                  <button
-                    className="session-action-btn delete"
-                    onClick={() => handleDeleteSession(session.id, getTodayDateStr())}
-                    title="Confirm delete"
-                  >
-                    ✓
-                  </button>
-                ) : (
-                  <button
-                    className="session-action-btn delete"
-                    onClick={() => setDeleteConfirm(session.id)}
-                    title="Delete"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
+                <button
+                  className="session-action-btn delete"
+                  onClick={() => setDeleteConfirm({ sessionId: session.id, session })}
+                  title="Delete"
+                >
+                  <Trash2 size={13} />
+                </button>
               </div>
             </div>
           ))
@@ -545,6 +603,26 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                           {session.category}
                         </span>
                       )}
+                      {isLegacySession(session) && (() => {
+                        const url = basecampEntryUrl(session);
+                        return (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Session created before v5.1 — entryId not stored. Fix this entry in Basecamp manually."
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 2,
+                              fontSize: 9, fontWeight: 600, padding: '1px 5px',
+                              borderRadius: 4, background: 'rgba(255,149,0,0.15)',
+                              border: '1px solid #FF9500', color: '#FF9500',
+                              textDecoration: 'none', whiteSpace: 'nowrap',
+                            }}
+                          >
+                            Pre-v5.1 — sync via Basecamp
+                          </a>
+                        );
+                      })()}
                     </div>
                     <div style={{ fontSize: 10, color: 'var(--zen-tertiary-text)', marginTop: 2 }}>
                       {session.startTime ? new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
@@ -572,23 +650,13 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
                     >
                       <Pencil size={13} />
                     </button>
-                    {deleteConfirm === session.id ? (
-                      <button
-                        className="session-action-btn delete"
-                        onClick={() => handleDeleteSession(session.id, selectedDate)}
-                        title="Confirm delete"
-                      >
-                        ✓
-                      </button>
-                    ) : (
-                      <button
-                        className="session-action-btn delete"
-                        onClick={() => setDeleteConfirm(session.id)}
-                        title="Delete"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
+                    <button
+                      className="session-action-btn delete"
+                      onClick={() => setDeleteConfirm({ sessionId: session.id, session })}
+                      title="Delete"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -598,6 +666,52 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
               No recordings on this day
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delete Confirm Overlay */}
+      {deleteConfirm && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setDeleteConfirm(null)}
+        >
+          <div
+            style={{
+              background: 'var(--zen-card-bg)', border: '1px solid var(--zen-divider)',
+              borderRadius: 12, padding: 24, maxWidth: 380, width: '90%',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>Delete this session?</div>
+            {deleteConfirm.session.basecamp?.entryId ? (
+              <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', lineHeight: 1.6, marginBottom: 16 }}>
+                This also permanently removes the matching Basecamp timesheet entry.{' '}
+                <strong>This cannot be undone</strong> — Basecamp does not keep deleted entries in any trash.
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--zen-secondary-text)', lineHeight: 1.6, marginBottom: 16 }}>
+                This session will be removed from your local timesheet.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  const { sessionId, session } = deleteConfirm;
+                  const date = selectedDate ?? getTodayDateStr();
+                  handleDeleteSession(sessionId, date, session);
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -621,6 +735,9 @@ export default function TimesheetTab({ records, isPro, onRefreshRecords }: Props
           }}
         />
       )}
+
+      {/* Toast notifications */}
+      <Toast toasts={toasts} onDismiss={dismiss} />
     </div>
   );
 }

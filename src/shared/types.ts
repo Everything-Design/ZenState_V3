@@ -88,6 +88,10 @@ export interface DailySession {
     todoId: number;
     todoListId?: number;
     synced?: boolean; // true once pushed to Basecamp's timesheet
+    // Persistent Basecamp Timesheet::Entry id, set after a successful create.
+    // Required for update/delete propagation. Sessions created before v5.1.0
+    // don't have this — UI falls back to "fix in Basecamp manually" links.
+    entryId?: number;
   };
 }
 
@@ -224,6 +228,64 @@ export interface BasecampTodo {
   appUrl: string;
 }
 
+// A todo from GET /my/assignments.json — cross-project, includes bucket and
+// parent (todolist) inline so we can pin without an extra fetch.
+export interface MyAssignment {
+  id: number;
+  content: string;
+  type: string;          // "Todo" — could theoretically be Card; we filter to Todo
+  url: string;
+  appUrl: string;
+  dueOn?: string;        // YYYY-MM-DD
+  bucket: {
+    id: number;          // = projectId
+    name: string;
+    type: string;        // "Project"
+  };
+  parent?: {
+    id: number;          // = todoListId
+    title: string;
+    type: string;        // "Todolist"
+  };
+  assignees: { id: number; name: string }[];
+}
+
+export interface MyAssignmentsResponse {
+  priorities: MyAssignment[];
+  nonPriorities: MyAssignment[];
+}
+
+// Scope filter values accepted by GET /my/assignments/due.json
+export type MyAssignmentsDueScope =
+  | 'overdue'
+  | 'due_today'
+  | 'due_tomorrow'
+  | 'due_later_this_week'
+  | 'due_next_week'
+  | 'due_later';
+
+// A search hit from GET /search.json?type=Todo. The shape lines up with
+// MyAssignment closely so the same row component can render both.
+export interface TodoSearchResult {
+  id: number;
+  type: string;          // "Todo"
+  title: string;         // matched title (may contain <em>...</em> highlights)
+  excerpt?: string;
+  url: string;
+  appUrl: string;
+  bucket: {
+    id: number;
+    name: string;
+    type: string;
+  };
+  parent?: {
+    id: number;
+    title: string;
+    type: string;
+  };
+  createdAt: string;
+}
+
 // ── License Types ──────────────────────────────────────────────
 
 export interface LicensePayload {
@@ -355,13 +417,23 @@ export const IPC = {
   BC_CREATE_TODO: 'basecamp:create-todo',
   BC_POST_COMMENT: 'basecamp:post-comment',
   BC_CREATE_TIME_ENTRY: 'basecamp:create-time-entry',
+  // v5.1.0 — propagate local edits/deletes back to Basecamp using the
+  // entry id persisted on DailySession.basecamp.entryId.
+  BC_UPDATE_TIME_ENTRY: 'basecamp:update-time-entry',
+  BC_DELETE_TIME_ENTRY: 'basecamp:delete-time-entry',
   BC_GET_PROJECT_TIMESHEET: 'basecamp:get-project-timesheet',
   BC_BACKFILL_TIMESHEET: 'basecamp:backfill-timesheet',
+  // v5.1.0 — pin UX shortcuts. /my/assignments.json removes the 3-layer drill
+  // for the common "pin one of my todos" case; search/due are tab fallbacks.
+  BC_GET_MY_ASSIGNMENTS: 'basecamp:get-my-assignments',
+  BC_GET_MY_ASSIGNMENTS_DUE: 'basecamp:get-my-assignments-due',
+  BC_SEARCH_TODOS: 'basecamp:search-todos',
   BC_AUTH_CHANGED: 'basecamp:auth-changed', // main → renderer
 
   // Today plan + Recents (renderer → main)
   TODAY_GET: 'today:get',
   TODAY_PIN: 'today:pin',
+  TODAY_PIN_MANY: 'today:pin-many', // v5.1.0 — batch pin from new PinPicker
   TODAY_UNPIN: 'today:unpin',
   TODAY_REORDER: 'today:reorder',
   TODAY_SET_ESTIMATE: 'today:set-estimate',
@@ -373,9 +445,15 @@ export const IPC = {
   // tomorrow's items merge into today's (along with today's unfinished carry-overs).
   TOMORROW_GET: 'tomorrow:get',
   TOMORROW_PIN: 'tomorrow:pin',
+  TOMORROW_PIN_MANY: 'tomorrow:pin-many', // v5.1.0 — batch pin
   TOMORROW_UNPIN: 'tomorrow:unpin',
   TOMORROW_REORDER: 'tomorrow:reorder',
   TOMORROW_SET_ESTIMATE: 'tomorrow:set-estimate',
   TOMORROW_TOGGLE_COMPLETE: 'tomorrow:toggle-complete',
   TOMORROW_CHANGED: 'tomorrow:changed', // main → renderer
+
+  // v5.1.0 — alert windows fetch their current payload on mount instead of
+  // relying on the one-shot 'alert-data' broadcast (fixes the blank-window
+  // race when the renderer initialises after main has already sent).
+  ALERT_GET_DATA: 'alert:get-data',
 } as const;
