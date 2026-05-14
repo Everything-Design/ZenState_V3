@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage, dialog, powerMonitor } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, Notification, nativeImage, dialog, powerMonitor, crashReporter } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -22,6 +22,23 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled promise rejection in main process:', reason);
 });
+
+// v5.1.2 — Local crash dumps. No upload (uploadToServer:false), no privacy
+// concern; dumps land under ~/Library/Application Support/zenstate/Crashpad/
+// (mac) or %AppData%\zenstate\Crashpad (win). When a user reports "ZenState
+// quit suddenly", we can ask them for the latest crash file to triage.
+// Must be started BEFORE app.on('ready') to capture early crashes.
+try {
+  crashReporter.start({
+    productName: 'ZenState',
+    companyName: 'Everything Design',
+    submitURL: '',
+    uploadToServer: false,
+    ignoreSystemCrashHandler: false,
+  });
+} catch (err) {
+  console.warn('crashReporter.start failed (non-fatal):', err);
+}
 
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
@@ -166,17 +183,20 @@ app.on('ready', async () => {
     user.isAdmin = licenseState.isValid && licenseState.isAdmin;
     persistence.saveUser(user);
     startNetworking(user);
-  } else {
-    // First launch — open Dashboard for onboarding instead of the tiny popover
-    dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
-    if (process.platform === 'darwin') app.dock?.show();
-    dashboardWindow.on('closed', () => {
-      dashboardWindow = null;
-      if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
-        app.dock?.hide();
-      }
-    });
   }
+
+  // v5.1.1 — Always open the Dashboard on launch. Previously the app would
+  // boot silently to the menu bar when a user was already signed in, leaving
+  // many users unsure whether the app was running. The onboarding path
+  // already opened the dashboard; this just unifies the two.
+  dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
+  if (process.platform === 'darwin') app.dock?.show();
+  dashboardWindow.on('closed', () => {
+    dashboardWindow = null;
+    if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
+      app.dock?.hide();
+    }
+  });
 
   // Auto-update (production only)
   if (!isDev()) {
@@ -186,6 +206,44 @@ app.on('ready', async () => {
 
 app.on('window-all-closed', () => {
   // Don't quit — menu bar app. Do nothing.
+});
+
+// v5.1.2 — Renderer / child-process crash recovery. The intermittent
+// "ZenState quits after a few minutes" reports were almost certainly
+// renderer-process crashes propagating up: when a renderer dies and the
+// event isn't handled, Electron's default behaviour can lead to the main
+// process tearing down too. Logging the crash + recreating the affected
+// window (where it's safe to do so) keeps the app alive instead of letting
+// it disappear on the user mid-flow.
+app.on('render-process-gone', (_event, webContents, details) => {
+  const url = (() => { try { return webContents.getURL(); } catch { return '<unavailable>'; } })();
+  console.error(`Renderer crashed (${details.reason}, exit=${details.exitCode}, url=${url})`);
+
+  // Identify which surface died by URL pattern and recreate it lazily.
+  // Popover + mini-timer recover on next user action (togglePopover already
+  // re-creates a destroyed popover; the pill is re-shown on next startTimer).
+  // The dashboard is the only window that should be recreated immediately —
+  // it's the most visible surface and losing it looks like the app crashed.
+  if (url.includes('dashboard.html') && (!dashboardWindow || dashboardWindow.isDestroyed())) {
+    try {
+      dashboardWindow = createDashboardWindow(getRendererURL('dashboard.html'));
+      if (process.platform === 'darwin') app.dock?.show();
+      dashboardWindow.on('closed', () => {
+        dashboardWindow = null;
+        if (process.platform === 'darwin' && !popoverWindow?.isVisible()) {
+          app.dock?.hide();
+        }
+      });
+    } catch (recoverErr) {
+      console.error('Failed to recreate dashboard after renderer crash:', recoverErr);
+    }
+  }
+});
+
+app.on('child-process-gone', (_event, details) => {
+  // GPU / utility / Pepper crashes. Electron auto-recovers GPU on its own.
+  // We just log so a future "app quit suddenly" report has a trail.
+  console.error(`Child process crashed (type=${details.type}, reason=${details.reason}, exit=${details.exitCode})`);
 });
 
 app.on('before-quit', () => {
@@ -200,7 +258,12 @@ app.on('second-instance', () => {
 // ── Popover Toggle ─────────────────────────────────────────────
 
 function togglePopover() {
-  if (!popoverWindow) return;
+  // v5.1.1 — Recover from a destroyed popover window (rare but possible after
+  // GPU crash / renderer reload / OS-level cleanup). Without this, the tray
+  // click silently no-ops forever once the window is gone.
+  if (!popoverWindow || popoverWindow.isDestroyed()) {
+    popoverWindow = createPopoverWindow(getRendererURL('index.html'));
+  }
 
   // Onboarding gate — until the user has finished the dashboard signup form,
   // suppress the popover entirely and route the tray click to the dashboard
@@ -215,9 +278,24 @@ function togglePopover() {
     return;
   }
 
-  if (popoverWindow.isVisible()) {
+  // v5.1.1 — `isVisible()` alone can desync from actual on-screen state on
+  // macOS after Space transitions, OS focus events, or rapid show/hide cycles.
+  // When that happens, every tray click reads isVisible()=true → hide() is a
+  // no-op → the popover appears "stuck closed" and clicks silently fail.
+  // Requiring isFocused() too means: if Electron thinks the popover is visible
+  // but it's actually background/off-screen, treat the click as "show it" not
+  // "hide it" — recovers from the stuck state in one click.
+  const isActuallyShowing = popoverWindow.isVisible() && popoverWindow.isFocused();
+  if (isActuallyShowing) {
     popoverWindow.hide();
     return;
+  }
+
+  // Defense in depth — if Electron's state is stale, force a hide first so
+  // the subsequent show() actually re-runs the position + visibility setup
+  // and presents a fresh window instead of a no-op.
+  if (popoverWindow.isVisible()) {
+    popoverWindow.hide();
   }
 
   // Position near tray icon
@@ -1094,6 +1172,17 @@ function setupIPC() {
     const trimmedNotes = (payload.notes ?? '').trim();
     const description = trimmedNotes || pending.taskLabel;
 
+    // v5.1.1 — When the user edits the duration in the Review-before-posting
+    // popup, that edited value goes to Basecamp BUT the local session's
+    // `duration` field was previously left at the original timer-measured
+    // value, so the Timesheet tab showed the un-edited time. Convert the
+    // decimal-hours value back to seconds and only push a duration update
+    // when it differs meaningfully (>=1s) from the original.
+    const editedDurationSec = Math.round(parseFloat(hours) * 3600);
+    const durationChanged = Number.isFinite(editedDurationSec)
+      && editedDurationSec > 0
+      && Math.abs(editedDurationSec - pending.durationSec) >= 1;
+
     try {
       const entry = await basecamp.api.createTimesheetEntry({
         todoId: link.todoId,
@@ -1103,17 +1192,22 @@ function setupIPC() {
       });
       // Persist entryId alongside synced=true and the notes in one write,
       // so the row in TimesheetTab can later be edited and propagate to the
-      // same Basecamp entry.
+      // same Basecamp entry. Also propagate the edited duration (v5.1.1) so
+      // the local row reflects what was actually posted to Basecamp.
       const existing = timeTracker.findSession(pending.sessionId, pending.sessionDateStr);
       if (existing?.basecamp) {
         timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, {
           basecamp: { ...existing.basecamp, synced: true, entryId: entry.id },
           ...(trimmedNotes ? { notes: trimmedNotes } : {}),
+          ...(durationChanged ? { duration: editedDurationSec } : {}),
         });
       } else {
         timeTracker.markSessionSynced(pending.sessionId, pending.sessionDateStr);
-        if (trimmedNotes) {
-          timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, { notes: trimmedNotes });
+        if (trimmedNotes || durationChanged) {
+          timeTracker.updateSession(pending.sessionId, pending.sessionDateStr, {
+            ...(trimmedNotes ? { notes: trimmedNotes } : {}),
+            ...(durationChanged ? { duration: editedDurationSec } : {}),
+          });
         }
       }
       broadcastToWindows('basecamp:timesheet-updated', { projectId: link.projectId, todoId: link.todoId });

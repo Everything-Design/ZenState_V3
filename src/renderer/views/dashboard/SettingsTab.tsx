@@ -42,7 +42,9 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
   const [nameInput, setNameInput] = useState(currentUser.name);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'not-available' | 'downloaded'>('idle');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'downloading' | 'not-available' | 'downloaded' | 'error'>('idle');
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // Avatar mode: 'photo' | 'initial' | 'emoji'
   const [avatarMode, setAvatarMode] = useState<'photo' | 'initial' | 'emoji'>(
@@ -101,8 +103,31 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     // Each on() returns its own unsubscribe so when SettingsTab unmounts we
     // detach only these listeners — not, e.g., ProjectsTab's subscription on
     // the same basecamp:auth-changed channel in the same dashboard window.
-    const offUpdate = window.zenstate.on('update:downloaded', () => {
+    // v5.1.2 — full update lifecycle. The previous "stuck at downloading"
+    // bug on Windows was driven by the renderer only listening for the final
+    // `update:downloaded` event. By subscribing to progress + error too, the
+    // UI can show real progress and recover from a failed download instead
+    // of sitting on "available" forever.
+    const offDownloaded = window.zenstate.on('update:downloaded', () => {
       setUpdateStatus('downloaded');
+      setUpdateProgress(null);
+      setUpdateError(null);
+    });
+    const offProgress = window.zenstate.on('update:progress', (...args: unknown[]) => {
+      const p = args[0] as { percent: number };
+      setUpdateStatus('downloading');
+      setUpdateProgress(typeof p?.percent === 'number' ? p.percent : null);
+    });
+    const offUpdateError = window.zenstate.on('update:error', (...args: unknown[]) => {
+      const e = args[0] as { message?: string };
+      setUpdateStatus('error');
+      setUpdateError(e?.message ?? 'Update failed');
+      setUpdateProgress(null);
+    });
+    const offNotAvailable = window.zenstate.on('update:not-available', () => {
+      // Only switch to 'not-available' if we were actively checking — otherwise
+      // the periodic background check would replace 'downloaded' or 'idle'.
+      setUpdateStatus((prev) => (prev === 'checking' ? 'not-available' : prev));
     });
 
     // Basecamp: seed state and listen for auth changes from main process
@@ -122,7 +147,10 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
     });
 
     return () => {
-      offUpdate();
+      offDownloaded();
+      offProgress();
+      offUpdateError();
+      offNotAvailable();
       offAuth();
       if (bcConnectTimer.current) clearInterval(bcConnectTimer.current);
     };
@@ -130,17 +158,21 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
 
   async function handleCheckForUpdate() {
     setUpdateStatus('checking');
+    setUpdateProgress(null);
+    setUpdateError(null);
     try {
       const result = await (window as any).zenstate.checkForUpdate();
       if (result?.updateAvailable) {
+        // 'available' is brief — autoDownload is on so the download starts
+        // immediately and update:progress events will flip us to 'downloading'.
         setUpdateStatus('available');
       } else {
         setUpdateStatus('not-available');
-        setTimeout(() => setUpdateStatus('idle'), 3000);
+        setTimeout(() => setUpdateStatus((s) => (s === 'not-available' ? 'idle' : s)), 3000);
       }
-    } catch {
-      setUpdateStatus('not-available');
-      setTimeout(() => setUpdateStatus('idle'), 3000);
+    } catch (err) {
+      setUpdateStatus('error');
+      setUpdateError((err as Error)?.message ?? 'Check failed');
     }
   }
 
@@ -812,7 +844,12 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
               <span style={{ fontSize: 12, color: 'var(--zen-secondary-text)' }}>Checking for updates...</span>
             )}
             {updateStatus === 'available' && (
-              <span style={{ fontSize: 12, color: 'var(--zen-primary)' }}>Downloading update...</span>
+              <span style={{ fontSize: 12, color: 'var(--zen-primary)' }}>Update found — starting download…</span>
+            )}
+            {updateStatus === 'downloading' && (
+              <span style={{ fontSize: 12, color: 'var(--zen-primary)' }}>
+                Downloading update… {updateProgress !== null ? `${updateProgress}%` : ''}
+              </span>
             )}
             {updateStatus === 'not-available' && (
               <span style={{ fontSize: 12, color: 'var(--status-available)' }}>You're up to date</span>
@@ -822,6 +859,16 @@ export default function SettingsTab({ currentUser, peers, isPro, licenseState, o
                 <span style={{ fontSize: 12, color: 'var(--status-available)' }}>Update ready — Restart to update</span>
                 <button className="btn btn-primary" onClick={() => (window as any).zenstate.installUpdate()}>
                   Restart Now
+                </button>
+              </div>
+            )}
+            {updateStatus === 'error' && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, color: 'var(--status-occupied, #ff6b6b)' }}>
+                  Update failed{updateError ? ` — ${updateError}` : ''}
+                </span>
+                <button className="btn btn-secondary" onClick={handleCheckForUpdate}>
+                  Try again
                 </button>
               </div>
             )}
