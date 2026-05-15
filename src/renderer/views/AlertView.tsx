@@ -13,7 +13,7 @@ interface Props {
   onDismiss: () => void;
   onLongRunResponse?: (action: 'continue' | 'stop' | 'backdate', stopAtIso?: string) => void;
   onIdleResponse?: (action: 'continue' | 'pause' | 'backdate', stopAtIso?: string, enableMeetingMode?: boolean) => void;
-  onTimesheetConfirm?: (action: 'post' | 'discard', hours?: string, notes?: string) => void;
+  onTimesheetConfirm?: (action: 'post' | 'discard', hours?: string, notes?: string, durationSec?: number) => void;
 }
 
 const QUICK_REPLIES = ['Give me 5 mins', 'Free after lunch', "Let's do tomorrow"];
@@ -199,7 +199,7 @@ export default function AlertView({ type, from, senderId, message, accepted, tar
       seconds={seconds}
       defaultHours={exactHours}
       defaultNotes={message ?? ''}
-      onConfirm={(hours, notes) => { onTimesheetConfirm?.('post', hours, notes); onDismiss(); }}
+      onConfirm={(hours, notes, durationSec) => { onTimesheetConfirm?.('post', hours, notes, durationSec); onDismiss(); }}
       onDiscard={() => { onTimesheetConfirm?.('discard'); onDismiss(); }}
     />;
   }
@@ -403,7 +403,7 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
   seconds: number;
   defaultHours: string;
   defaultNotes: string;
-  onConfirm: (hours: string, notes: string) => void;
+  onConfirm: (hours: string, notes: string, durationSec: number) => void;
   onDiscard: () => void;
 }) {
   // Display the tracked time in the same h/m format used everywhere else in
@@ -515,7 +515,7 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && isValid) {
-            onConfirm(decimalHours, notes.trim());
+            onConfirm(decimalHours, notes.trim(), totalSeconds);
           }
         }}
       />
@@ -534,7 +534,7 @@ function TimesheetConfirmPanel({ taskLabel, seconds, defaultHours, defaultNotes,
         <button
           className="btn btn-primary"
           style={{ flex: 2 }}
-          onClick={() => onConfirm(decimalHours, notes.trim())}
+          onClick={() => onConfirm(decimalHours, notes.trim(), totalSeconds)}
           disabled={!isValid}
         >
           Post {isValid ? `${decimalHours} hr` : ''}

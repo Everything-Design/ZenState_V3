@@ -46,7 +46,7 @@ declare global {
       timerLongRunRespond: (payload: { action: 'continue' | 'stop' | 'backdate'; stopAtIso?: string }) => void;
       timerIdleRespond: (payload: { action: 'continue' | 'pause' | 'backdate'; stopAtIso?: string; enableMeetingMode?: boolean }) => void;
       timerSetMeetingMode: (on: boolean) => void;
-      timerTimesheetConfirm: (payload: { action: 'post' | 'discard'; hours?: string; notes?: string }) => void;
+      timerTimesheetConfirm: (payload: { action: 'post' | 'discard'; hours?: string; notes?: string; durationSec?: number }) => void;
       miniTimerResize: (size: { width: number; height: number }) => void;
       miniTimerMoveBy: (delta: { dx: number; dy: number }) => void;
       miniTimerGetNotes: () => Promise<string>;
@@ -218,6 +218,20 @@ export default function DashboardApp() {
       window.zenstate.on('basecamp:auth-changed', (state: unknown) => {
         const s = state as { isConnected?: boolean };
         if (s?.isConnected) setNeedsBasecampReauth(false);
+      }),
+      // v5.1.3 — Refresh records on every Basecamp timesheet-state change.
+      // Fires from: TIMER_TIMESHEET_CONFIRM post, stopTimer auto-post,
+      // ADD_SESSION, UPDATE_SESSION, DELETE_SESSION, BC_BACKFILL_TIMESHEET.
+      // Previously the records were only refreshed by the 500ms-after-stop
+      // setTimeout, which fired BEFORE the user had a chance to edit hours
+      // in the "Review before posting" popup. By the time the post handler
+      // updated the local session's duration, the renderer had already cached
+      // the original timer-measured value and there was no event to trigger
+      // a re-fetch — so Plan / Timesheet showed the wrong duration.
+      window.zenstate.on('basecamp:timesheet-updated', () => {
+        window.zenstate.getRecords().then((rs) => {
+          setRecords(rs as DailyRecord[]);
+        }).catch(() => {});
       }),
     ];
     return () => { offs.forEach((off) => off()); };

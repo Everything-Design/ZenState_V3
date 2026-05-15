@@ -231,7 +231,7 @@ contextBridge.exposeInMainWorld('zenstate', {
   timerLongRunRespond: (payload: { action: 'continue' | 'stop' | 'backdate'; stopAtIso?: string }) => ipcRenderer.send(IPC.TIMER_LONG_RUN_RESPONSE, payload),
   timerIdleRespond: (payload: { action: 'continue' | 'pause' | 'backdate'; stopAtIso?: string; enableMeetingMode?: boolean }) => ipcRenderer.send(IPC.TIMER_IDLE_RESPONSE, payload),
   timerSetMeetingMode: (on: boolean) => ipcRenderer.send(IPC.TIMER_SET_MEETING_MODE, on),
-  timerTimesheetConfirm: (payload: { action: 'post' | 'discard'; hours?: string; notes?: string }) => ipcRenderer.send(IPC.TIMER_TIMESHEET_CONFIRM, payload),
+  timerTimesheetConfirm: (payload: { action: 'post' | 'discard'; hours?: string; notes?: string; durationSec?: number }) => ipcRenderer.send(IPC.TIMER_TIMESHEET_CONFIRM, payload),
   miniTimerResize: (size: { width: number; height: number }) => ipcRenderer.send(IPC.MINI_TIMER_RESIZE, size),
   miniTimerMoveBy: (delta: { dx: number; dy: number }) => ipcRenderer.send(IPC.MINI_TIMER_MOVE_BY, delta),
   miniTimerGetNotes: () => ipcRenderer.invoke(IPC.MINI_TIMER_GET_NOTES),

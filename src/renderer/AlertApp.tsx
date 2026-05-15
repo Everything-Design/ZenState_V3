@@ -54,8 +54,8 @@ export default function AlertApp() {
       onIdleResponse={(action, stopAtIso, enableMeetingMode) => {
         window.zenstate.timerIdleRespond({ action, stopAtIso, enableMeetingMode });
       }}
-      onTimesheetConfirm={(action, hours, notes) => {
-        window.zenstate.timerTimesheetConfirm({ action, hours, notes });
+      onTimesheetConfirm={(action, hours, notes, durationSec) => {
+        window.zenstate.timerTimesheetConfirm({ action, hours, notes, durationSec });
       }}
     />
   );

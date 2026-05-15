@@ -1154,7 +1154,7 @@ function setupIPC() {
   // chosen action (post or discard) plus an optional edited hours value.
   // - post:    create the entry, mark the local session synced, refresh badges
   // - discard: leave the local session unsynced; the user can backfill later
-  ipcMain.on(IPC.TIMER_TIMESHEET_CONFIRM, async (_e, payload: { action: 'post' | 'discard'; hours?: string; notes?: string }) => {
+  ipcMain.on(IPC.TIMER_TIMESHEET_CONFIRM, async (_e, payload: { action: 'post' | 'discard'; hours?: string; notes?: string; durationSec?: number }) => {
     const pending = pendingTimesheetEntry;
     if (!pending) return;
     pendingTimesheetEntry = null;
@@ -1172,13 +1172,16 @@ function setupIPC() {
     const trimmedNotes = (payload.notes ?? '').trim();
     const description = trimmedNotes || pending.taskLabel;
 
-    // v5.1.1 — When the user edits the duration in the Review-before-posting
-    // popup, that edited value goes to Basecamp BUT the local session's
-    // `duration` field was previously left at the original timer-measured
-    // value, so the Timesheet tab showed the un-edited time. Convert the
-    // decimal-hours value back to seconds and only push a duration update
-    // when it differs meaningfully (>=1s) from the original.
-    const editedDurationSec = Math.round(parseFloat(hours) * 3600);
+    // v5.1.1 / v5.1.3 — When the user edits the duration in the Review-
+    // before-posting popup, that edited value goes to Basecamp BUT the local
+    // session's `duration` field was previously left at the original timer-
+    // measured value. v5.1.3 prefers the exact `durationSec` field (added so
+    // odd minute values like 1m, 5m, 20m don't drift up to 30s when round-
+    // tripped through the lossy decimal-hours toFixed(2) representation).
+    // Falls back to parsing `hours` for backwards compatibility.
+    const editedDurationSec = (typeof payload.durationSec === 'number' && Number.isFinite(payload.durationSec) && payload.durationSec > 0)
+      ? Math.round(payload.durationSec)
+      : Math.round(parseFloat(hours) * 3600);
     const durationChanged = Number.isFinite(editedDurationSec)
       && editedDurationSec > 0
       && Math.abs(editedDurationSec - pending.durationSec) >= 1;
